@@ -6,8 +6,8 @@ from typing import List, get_args
 
 from langchain_groq import ChatGroq
 
-from core import config
-from core.log import log
+from constellation.core import config
+from constellation.core.log import log
 
 current_key_index = 0
 key_rotation_lock = None
@@ -86,7 +86,7 @@ def prepare_note_text(content: str, max_chars: int = None) -> str:
     """Strip auto-generated sections and cap size so Groq free-tier TPM checks pass."""
     # Imported lazily: core.* must not depend on nodes.* at import time, otherwise
     # anything that imports nodes.io first gets a circular import.
-    from nodes.io import strip_auto_sections
+    from constellation.nodes.io import strip_auto_sections
 
     max_chars = max_chars or config.LLM_MAX_NOTE_CHARS
     text = strip_auto_sections(content).strip()

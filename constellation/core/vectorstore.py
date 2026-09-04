@@ -10,7 +10,7 @@ from typing import Iterable, List, Optional
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 
-from core.log import log
+from constellation.core.log import log
 
 INDEX_DIRNAME = ".linker_faiss_index"
 

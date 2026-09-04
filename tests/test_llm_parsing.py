@@ -17,8 +17,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from langchain_core.messages import AIMessage
-from core import config, utils
-from core.state import ConceptExtractionOutput, RelationshipExtractionOutput
+from constellation.core import config, utils
+from constellation.core.state import ConceptExtractionOutput, RelationshipExtractionOutput
 
 
 def concept(name="Docker", **over):

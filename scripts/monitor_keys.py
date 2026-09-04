@@ -1,8 +1,12 @@
 import os
+import sys
+from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-from core import config
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from constellation.core import config
 
 def monitor_groq_key(index, api_key):
     print(f"Checking Groq Key {index + 1} ({api_key[:8]}...)...")

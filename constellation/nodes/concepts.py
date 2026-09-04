@@ -3,11 +3,11 @@ import re
 
 from langchain_core.documents import Document
 
-from core import config, vectorstore
-from core.log import log
-from core.prompts import prompt_concept_extraction, prompt_concept_verification
-from core.state import AgentState, ConceptExtractionOutput
-from core.utils import abatch_invoke_with_retry, minify_concepts, prepare_note_text
+from constellation.core import config, vectorstore
+from constellation.core.log import log
+from constellation.core.prompts import prompt_concept_extraction, prompt_concept_verification
+from constellation.core.state import AgentState, ConceptExtractionOutput
+from constellation.core.utils import abatch_invoke_with_retry, minify_concepts, prepare_note_text
 
 
 async def concept_extractor(state: AgentState):

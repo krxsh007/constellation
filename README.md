@@ -6,7 +6,7 @@ Everything runs on your machine. The only things that leave it are note contents
 
 ## 📊 Pipeline Graph
 
-![Constellation Pipeline](images/graph_visualization.png)
+![Constellation Pipeline](assets/graph_visualization.png)
 
 ## ✨ What it does
 
@@ -78,11 +78,11 @@ Two options worth knowing:
 Prefer the terminal?
 
 ```bash
-python main.py "C:/path/to/vault"      # or: python run_local.py "C:/path/to/vault"
-python monitor_keys.py                 # check rate-limit headroom on every key
-python -m unittest discover tests      # run entire test suite
-python tests/test_notes.py             # note read/write round-trip tests
-python tests/test_llm_parsing.py       # LLM response parsing / fallback tests
+python main.py "C:/path/to/vault"          # or: python scripts/run_local.py "C:/path/to/vault"
+python scripts/monitor_keys.py             # check rate-limit headroom on every key
+python -m unittest discover tests          # run entire test suite
+python tests/test_notes.py                 # note read/write round-trip tests
+python tests/test_llm_parsing.py           # LLM response parsing / fallback tests
 ```
 
 ## 🧠 How it works

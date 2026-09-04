@@ -1,10 +1,10 @@
 import json
 
-from core import config, vectorstore
-from core.log import log
-from core.prompts import prompt_relation, prompt_relation_verify
-from core.state import AgentState, RelationshipExtractionOutput
-from core.utils import abatch_invoke_with_retry, minify_concepts
+from constellation.core import config, vectorstore
+from constellation.core.log import log
+from constellation.core.prompts import prompt_relation, prompt_relation_verify
+from constellation.core.state import AgentState, RelationshipExtractionOutput
+from constellation.core.utils import abatch_invoke_with_retry, minify_concepts
 
 
 async def relationship_extractor(state: AgentState):

@@ -12,12 +12,12 @@ import asyncio
 
 from langgraph.graph import StateGraph, END
 
-from core import config, utils
-from core.log import log
-from core.state import AgentState
-from nodes.concepts import concept_extractor, concept_verifier
-from nodes.io import link_writer, summary_reporter, vault_reader
-from nodes.relations import relationship_extractor, relationship_verifier
+from constellation.core import config, utils
+from constellation.core.log import log
+from constellation.core.state import AgentState
+from constellation.nodes.concepts import concept_extractor, concept_verifier
+from constellation.nodes.io import link_writer, summary_reporter, vault_reader
+from constellation.nodes.relations import relationship_extractor, relationship_verifier
 
 # --- Build graph ---
 graph = StateGraph(AgentState)

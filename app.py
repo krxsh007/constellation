@@ -11,10 +11,10 @@ import streamlit as st
 
 st.set_page_config(page_title="Constellation", page_icon="🌌", layout="wide")
 
-from core import config, log as logmod, vectorstore
-from core.utils import clean_path
+from constellation.core import config, log as logmod, vectorstore
+from constellation.core.utils import clean_path
 from main import run_pipeline
-from nodes.io import CACHE_FILENAME, count_notes
+from constellation.nodes.io import CACHE_FILENAME, count_notes
 
 VAULT_KEY = "vault_path"
 

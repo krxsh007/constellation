@@ -3,8 +3,8 @@ import json
 import re
 from pathlib import Path
 
-from core.log import log
-from core.state import AgentState
+from constellation.core.log import log
+from constellation.core.state import AgentState
 
 CACHE_FILENAME = ".linker_cache.json"
 # Directories Obsidian / this tool own -- never treat their contents as notes.

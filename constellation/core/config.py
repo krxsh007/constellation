@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from langchain_core.embeddings import Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-from core.log import log
+from constellation.core.log import log
 
 load_dotenv()
 

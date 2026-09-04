@@ -14,10 +14,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.utils import clean_path
-from nodes.concepts import _normalise_tags
-from nodes.io import get_core_hash, render_note, strip_auto_sections, vault_reader
-from nodes.relations import _resolve_title
+from constellation.core.utils import clean_path
+from constellation.nodes.concepts import _normalise_tags
+from constellation.nodes.io import get_core_hash, render_note, strip_auto_sections, vault_reader
+from constellation.nodes.relations import _resolve_title
 
 CASES = [
     (
