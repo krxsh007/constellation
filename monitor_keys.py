@@ -2,6 +2,8 @@ import os
 import requests
 from dotenv import load_dotenv
 
+from core import config
+
 def monitor_groq_key(index, api_key):
     print(f"Checking Groq Key {index + 1} ({api_key[:8]}...)...")
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -10,7 +12,7 @@ def monitor_groq_key(index, api_key):
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": config.LLM_MODEL,
         "messages": [{"role": "user", "content": "hi"}],
         "max_tokens": 1
     }

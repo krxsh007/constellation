@@ -6,7 +6,7 @@ from core import config, vectorstore
 from core.log import log
 from core.prompts import prompt_concept_extraction, prompt_concept_verification
 from core.state import AgentState, ConceptExtractionOutput
-from core.utils import abatch_invoke_with_retry
+from core.utils import abatch_invoke_with_retry, minify_concepts, prepare_note_text
 
 
 async def concept_extractor(state: AgentState):
@@ -20,7 +20,7 @@ async def concept_extractor(state: AgentState):
         return {"raw_concepts": [], "raw_tags_by_note": raw_tags_by_note}
 
     log(f"Extracting raw concepts from {len(new_notes)} notes concurrently...")
-    inputs_list = [{"text": note["content"]} for note in new_notes]
+    inputs_list = [{"text": prepare_note_text(note["content"])} for note in new_notes]
 
     results = await abatch_invoke_with_retry(
         prompt_concept_extraction, config.LLM_EXTRACTION, ConceptExtractionOutput, inputs_list
@@ -62,8 +62,8 @@ async def concept_verifier(state: AgentState):
 
         notes_with_concepts.append(note)
         inputs_list.append({
-            "text": note["content"],
-            "concepts": json.dumps(note_raw_concepts),
+            "text": prepare_note_text(note["content"]),
+            "concepts": json.dumps(minify_concepts(note_raw_concepts)),
             "tags": json.dumps(state.get("raw_tags_by_note", {}).get(note["title"], []))
         })
 

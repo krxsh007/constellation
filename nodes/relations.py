@@ -72,8 +72,8 @@ def relationship_extractor(state: AgentState):
                     if match:
                         retrieved_concepts.append(match)
 
-            # Top 15 most similar keeps the prompt compact and precise.
-            retrieved_concepts = retrieved_concepts[:15]
+            # Top 10 most similar keeps the prompt compact and within Groq TPM limits.
+            retrieved_concepts = retrieved_concepts[:10]
 
             if not retrieved_concepts:
                 continue
@@ -108,8 +108,8 @@ def relationship_verifier(state: AgentState):
         return {"links": state.get("links", []), "new_links": []}
 
     try:
-        # Verify in batches of 20 to stay inside Groq's context/token limits (413).
-        batch_size = 20
+        # Verify in batches of 10 to stay inside Groq's context/token limits (413).
+        batch_size = 10
         all_verified_links = []
 
         log(f"Verifying {len(raw_links)} cross-note relationships in batches of {batch_size}...")

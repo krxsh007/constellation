@@ -17,12 +17,38 @@ from core.log import log
 
 load_dotenv()
 
+# Groq retired these on 2026-08-16; map old IDs so stale .env/sidebar values still work.
+_DEPRECATED_LLM_MODELS = {
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+}
+
+
+def _resolve_llm_model(name: str) -> str:
+    return _DEPRECATED_LLM_MODELS.get(name.strip(), name)
+
+
 # --- Models ---
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-2")
-LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
-LLM_EXTRACTION = os.getenv("LLM_EXTRACTION", LLM_MODEL)
-LLM_VERIFICATION = os.getenv("LLM_VERIFICATION", LLM_MODEL)
-LLM_RELATIONSHIP = os.getenv("LLM_RELATIONSHIP", LLM_MODEL)
+LLM_MODEL = _resolve_llm_model(os.getenv("LLM_MODEL", "openai/gpt-oss-120b"))
+LLM_EXTRACTION = _resolve_llm_model(os.getenv("LLM_EXTRACTION", LLM_MODEL))
+LLM_VERIFICATION = _resolve_llm_model(os.getenv("LLM_VERIFICATION", LLM_MODEL))
+LLM_RELATIONSHIP = _resolve_llm_model(os.getenv("LLM_RELATIONSHIP", LLM_MODEL))
+
+# Groq free/on_demand tier reserves input + max_tokens against an ~8K TPM bucket
+# per request, so these two have to be budgeted together:
+#   (LLM_MAX_NOTE_CHARS / 4) + LLM_MAX_OUTPUT_TOKENS  must stay under ~8000.
+# The gpt-oss models are reasoning models -- their reasoning tokens are billed
+# against max_tokens, so an output budget that looks generous for plain JSON can
+# be consumed entirely by reasoning, leaving an empty completion.
+LLM_MAX_OUTPUT_TOKENS = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "2048"))
+LLM_MAX_NOTE_CHARS = int(os.getenv("LLM_MAX_NOTE_CHARS", "12000"))
+LLM_CONCURRENCY = int(os.getenv("LLM_CONCURRENCY", "2"))
+
+# Reasoning effort for gpt-oss style models. "low" keeps the reasoning budget
+# small so the answer itself fits inside LLM_MAX_OUTPUT_TOKENS. Set to "" to
+# leave the parameter off the request entirely.
+LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "low").strip()
 
 
 def _dedupe(keys: List[str]) -> List[str]:
@@ -59,11 +85,11 @@ def set_google_keys(keys: List[str]) -> None:
 def set_models(extraction: str = None, verification: str = None, relationship: str = None) -> None:
     global LLM_EXTRACTION, LLM_VERIFICATION, LLM_RELATIONSHIP
     if extraction:
-        LLM_EXTRACTION = extraction
+        LLM_EXTRACTION = _resolve_llm_model(extraction)
     if verification:
-        LLM_VERIFICATION = verification
+        LLM_VERIFICATION = _resolve_llm_model(verification)
     if relationship:
-        LLM_RELATIONSHIP = relationship
+        LLM_RELATIONSHIP = _resolve_llm_model(relationship)
 
 
 current_google_key_index = 0
@@ -127,6 +153,8 @@ def describe_config() -> str:
     return (
         f"Extraction: {LLM_EXTRACTION} | Verification: {LLM_VERIFICATION} | "
         f"Relationship: {LLM_RELATIONSHIP} | Embeddings: {EMBEDDING_MODEL}\n"
+        f"Output budget: {LLM_MAX_OUTPUT_TOKENS} tokens | Note cap: {LLM_MAX_NOTE_CHARS} chars"
+        f"{f' | Reasoning effort: {LLM_REASONING_EFFORT}' if LLM_REASONING_EFFORT else ''}\n"
         f"{len(GROQ_API_KEYS)} Groq key(s), {len(GOOGLE_API_KEYS)} Google key(s) loaded for rotation."
     )
 

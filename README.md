@@ -46,10 +46,19 @@ Everything runs on your machine. The only things that leave it are note contents
    GOOGLE_API_KEY_1="AIza..."
 
    # Optional model overrides
-   LLM_MODEL="llama-3.3-70b-versatile"
-   LLM_EXTRACTION="llama-3.1-8b-instant"
-   LLM_VERIFICATION="llama-3.1-8b-instant"
-   LLM_RELATIONSHIP="llama-3.3-70b-versatile"
+   LLM_MODEL="openai/gpt-oss-120b"
+   LLM_EXTRACTION="openai/gpt-oss-20b"
+   LLM_VERIFICATION="openai/gpt-oss-20b"
+   LLM_RELATIONSHIP="openai/gpt-oss-120b"
+
+   # Optional Groq free-tier tuning.
+   # Budget rule: (LLM_MAX_NOTE_CHARS / 4) + LLM_MAX_OUTPUT_TOKENS < ~8000 TPM.
+   # The gpt-oss models are reasoning models -- their thinking tokens come out of
+   # LLM_MAX_OUTPUT_TOKENS, so too small a budget returns an empty completion.
+   LLM_MAX_OUTPUT_TOKENS="2048"
+   LLM_MAX_NOTE_CHARS="12000"
+   LLM_CONCURRENCY="2"
+   LLM_REASONING_EFFORT="low"   # low | medium | high, or "" to omit the parameter
    ```
    You can also paste keys straight into the app's sidebar instead of using `.env`.
 
@@ -72,6 +81,7 @@ Prefer the terminal?
 python main.py "C:/path/to/vault"      # or: python run_local.py "C:/path/to/vault"
 python monitor_keys.py                 # check rate-limit headroom on every key
 python tests/test_notes.py             # note read/write round-trip tests
+python tests/test_llm_parsing.py       # LLM response parsing / fallback tests
 ```
 
 ## 🧠 How it works
