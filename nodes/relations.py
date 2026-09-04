@@ -4,10 +4,10 @@ from core import config, vectorstore
 from core.log import log
 from core.prompts import prompt_relation, prompt_relation_verify
 from core.state import AgentState, RelationshipExtractionOutput
-from core.utils import invoke_with_retry, minify_concepts
+from core.utils import abatch_invoke_with_retry, minify_concepts
 
 
-def relationship_extractor(state: AgentState):
+async def relationship_extractor(state: AgentState):
     log("\n--- [Relationship Extractor] ---")
     new_concepts = state.get("new_concepts", [])
     all_concepts = state.get("concepts", [])
@@ -36,9 +36,9 @@ def relationship_extractor(state: AgentState):
             if note:
                 concepts_by_note.setdefault(note, []).append(c)
 
-        all_relations = []
-        log(f"Extracting relationships for {len(concepts_by_note)} notes...")
+        log(f"Extracting relationships for {len(concepts_by_note)} notes concurrently...")
 
+        inputs_list = []
         for note_title, note_concepts in concepts_by_note.items():
             retrieved_concepts = []
             retrieved_names = set()
@@ -78,18 +78,21 @@ def relationship_extractor(state: AgentState):
             if not retrieved_concepts:
                 continue
 
-            log(f"  '{note_title}': {len(note_concepts)} concepts vs {len(retrieved_concepts)} related concepts...")
+            inputs_list.append({
+                "new_concepts": json.dumps(minify_concepts(note_concepts)),
+                "existing_concepts": json.dumps(minify_concepts(retrieved_concepts))
+            })
 
-            extracted_output = invoke_with_retry(
-                prompt_relation, config.LLM_RELATIONSHIP, RelationshipExtractionOutput,
-                {
-                    "new_concepts": json.dumps(minify_concepts(note_concepts)),
-                    "existing_concepts": json.dumps(minify_concepts(retrieved_concepts))
-                }
+        all_relations = []
+        if inputs_list:
+            results = await abatch_invoke_with_retry(
+                prompt_relation, config.LLM_RELATIONSHIP, RelationshipExtractionOutput, inputs_list
             )
-
-            if extracted_output and extracted_output.links:
-                all_relations.extend([link.model_dump() for link in extracted_output.links])
+            for extracted_output in results:
+                if isinstance(extracted_output, Exception) or not extracted_output:
+                    continue
+                if extracted_output.links:
+                    all_relations.extend([link.model_dump() for link in extracted_output.links])
 
         log(f"Total raw cross-note relationships extracted: {len(all_relations)}")
         return {"raw_links": all_relations}
@@ -98,7 +101,7 @@ def relationship_extractor(state: AgentState):
         return {"raw_links": []}
 
 
-def relationship_verifier(state: AgentState):
+async def relationship_verifier(state: AgentState):
     log("\n--- [Relationship Verifier] ---")
     raw_links = state.get("raw_links", [])
     concepts = state.get("concepts", [])
@@ -110,9 +113,7 @@ def relationship_verifier(state: AgentState):
     try:
         # Verify in batches of 10 to stay inside Groq's context/token limits (413).
         batch_size = 10
-        all_verified_links = []
-
-        log(f"Verifying {len(raw_links)} cross-note relationships in batches of {batch_size}...")
+        inputs_list = []
 
         concept_lookup = {c["concept_name"]: c for c in concepts}
 
@@ -129,20 +130,22 @@ def relationship_verifier(state: AgentState):
             relevant_concepts = [concept_lookup[n] for n in concepts_in_batch if n in concept_lookup]
             minified_concepts = minify_concepts(relevant_concepts)
 
-            batch_no = i // batch_size + 1
-            total_batches = (len(raw_links) - 1) // batch_size + 1
-            log(f"  Batch {batch_no}/{total_batches} ({len(batch_links)} links, {len(minified_concepts)} concepts)...")
+            inputs_list.append({
+                "concepts": json.dumps(minified_concepts),
+                "relationships": json.dumps(batch_links)
+            })
 
-            verified_output = invoke_with_retry(
-                prompt_relation_verify, config.LLM_VERIFICATION, RelationshipExtractionOutput,
-                {
-                    "concepts": json.dumps(minified_concepts),
-                    "relationships": json.dumps(batch_links)
-                }
+        all_verified_links = []
+        if inputs_list:
+            log(f"Verifying {len(raw_links)} cross-note relationships across {len(inputs_list)} batches concurrently...")
+            results = await abatch_invoke_with_retry(
+                prompt_relation_verify, config.LLM_VERIFICATION, RelationshipExtractionOutput, inputs_list
             )
-
-            if verified_output and verified_output.links:
-                all_verified_links.extend([link.model_dump() for link in verified_output.links])
+            for verified_output in results:
+                if isinstance(verified_output, Exception) or not verified_output:
+                    continue
+                if verified_output.links:
+                    all_verified_links.extend([link.model_dump() for link in verified_output.links])
 
         # --- Structural filtering: no self-links, no links to non-existent notes ---
         note_titles = {note["title"] for note in state.get("notes", [])}
@@ -192,8 +195,11 @@ def relationship_verifier(state: AgentState):
 
 def _resolve_title(note: str, title_map: dict) -> str:
     """Resolves a model-supplied note name to a real vault filename, tolerating
-    a missing '.md' suffix and case differences."""
+    a missing '.md' suffix, wikilink brackets [[...]], quotes, and case differences."""
     if not note:
         return note
-    candidate = note if note.lower().endswith(".md") else f"{note}.md"
+    cleaned = str(note).strip().strip('"\'')
+    if cleaned.startswith("[[") and cleaned.endswith("]]"):
+        cleaned = cleaned[2:-2].strip()
+    candidate = cleaned if cleaned.lower().endswith(".md") else f"{cleaned}.md"
     return title_map.get(candidate.lower(), note)

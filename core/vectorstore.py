@@ -70,8 +70,15 @@ def add_documents(store: Optional[FAISS], docs: List[Document], embeddings) -> F
         return store
     if store is None:
         return FAISS.from_documents(docs, embeddings)
-    store.add_documents(docs)
-    return store
+    try:
+        store.add_documents(docs)
+        return store
+    except Exception as e:
+        err_msg = str(e).lower()
+        if "dimension" in err_msg or "d == " in err_msg:
+            log(f"  Warning: Vector dimension mismatch ({e}). Rebuilding fresh FAISS index for current embedding model...")
+            return FAISS.from_documents(docs, embeddings)
+        raise
 
 
 def count(store: Optional[FAISS]) -> int:
