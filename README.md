@@ -1,12 +1,12 @@
-# NeuroNote
+# 🌌 Constellation
 
-A local Streamlit app that organizes your Obsidian vault. Point it at a vault folder and it reads your markdown notes, extracts the core concepts with an LLM, then writes Obsidian tags and `[[wikilinks]]` back into the files — so your graph view actually connects up instead of showing a field of isolated dots.
+A local Streamlit app that organizes your Obsidian vault. Point it at a vault folder and it reads your markdown notes, extracts the core concepts with an LLM, then writes Obsidian tags and `[[wikilinks]]` back into the files — turning isolated notes into an interconnected constellation in your graph view.
 
 Everything runs on your machine. The only things that leave it are note contents sent to Groq (for extraction) and Google (for embeddings).
 
 ## 📊 Pipeline Graph
 
-![NeuroNote Pipeline](images/graph_visualization.png)
+![Constellation Pipeline](images/graph_visualization.png)
 
 ## ✨ What it does
 
@@ -80,6 +80,7 @@ Prefer the terminal?
 ```bash
 python main.py "C:/path/to/vault"      # or: python run_local.py "C:/path/to/vault"
 python monitor_keys.py                 # check rate-limit headroom on every key
+python -m unittest discover tests      # run entire test suite
 python tests/test_notes.py             # note read/write round-trip tests
 python tests/test_llm_parsing.py       # LLM response parsing / fallback tests
 ```

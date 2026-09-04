@@ -1,4 +1,4 @@
-"""NeuroNote pipeline.
+"""Constellation pipeline.
 
 Builds the LangGraph pipeline and exposes two entry points:
 

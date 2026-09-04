@@ -1,4 +1,4 @@
-"""NeuroNote -- local Streamlit UI.
+"""Constellation -- local Streamlit UI.
 
 Run with:  streamlit run app.py
 """
@@ -9,9 +9,10 @@ from pathlib import Path
 
 import streamlit as st
 
-st.set_page_config(page_title="NeuroNote", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Constellation", page_icon="🌌", layout="wide")
 
 from core import config, log as logmod, vectorstore
+from core.utils import clean_path
 from main import run_pipeline
 from nodes.io import CACHE_FILENAME, count_notes
 
@@ -22,11 +23,12 @@ VAULT_KEY = "vault_path"
 # Helpers
 # --------------------------------------------------------------------------- #
 def is_vault(path: str) -> bool:
-    return bool(path) and Path(path).expanduser().is_dir()
+    cleaned = clean_path(path)
+    return bool(cleaned) and Path(cleaned).is_dir()
 
 
 def vault_stats(path: str) -> dict:
-    vault = Path(path).expanduser()
+    vault = Path(clean_path(path))
     cache = vault / CACHE_FILENAME
     processed = 0
     if cache.exists():
@@ -44,7 +46,7 @@ def vault_stats(path: str) -> dict:
 
 def reset_vault_state(path: str) -> str:
     """Deletes the cache and FAISS index so the next run re-processes everything."""
-    vault = Path(path).expanduser()
+    vault = Path(clean_path(path))
     removed = []
     cache = vault / CACHE_FILENAME
     if cache.exists():
@@ -99,7 +101,7 @@ config.set_models(extraction_model, verification_model, relationship_model)
 # --------------------------------------------------------------------------- #
 # Main -- vault selection
 # --------------------------------------------------------------------------- #
-st.title("🧠 NeuroNote")
+st.title("🌌 Constellation")
 st.caption(
     "Reads every note in your vault, extracts concepts with an LLM, then writes "
     "Obsidian tags and `[[wikilinks]]` back into the files so the graph view connects up."
@@ -140,7 +142,7 @@ if valid:
         )
 
     st.info(
-        "NeuroNote appends a `## Tags` and `## Related Links` section to your notes. "
+        "Constellation appends a `## Tags` and `## Related Links` section to your notes. "
         "It only rewrites those two sections, but a backup of your vault is still a good idea "
         "before the first run.",
         icon="⚠️",
@@ -171,7 +173,7 @@ if valid:
         logmod.set_sink(sink)
         try:
             with st.spinner("Running the pipeline — this can take a few minutes on a large vault..."):
-                result = run_pipeline(vault_path, dry_run=dry_run)
+                result = run_pipeline(clean_path(vault_path), dry_run=dry_run)
             st.session_state["result"] = result
             st.session_state["result_dry_run"] = dry_run
             st.session_state["log"] = list(lines)
