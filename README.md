@@ -115,3 +115,7 @@ Two files are created inside your vault, both safe to delete (they'll be rebuilt
 - `.linker_faiss_index/` — the local vector index.
 
 > **Tip:** back up your vault before the first run. The tool is careful, but it does rewrite files.
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
