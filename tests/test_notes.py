@@ -1,18 +1,23 @@
-"""Tests for the note read/write round-trip.
+"""Tests for the note read/write round-trip and parsing utilities.
 
 These guard the riskiest part of the tool: it rewrites files in your vault, so
 stripping and re-rendering a note must never lose hand-written content and must
 be stable across runs.
 
 Run with:  python tests/test_notes.py
+      or:  python -m unittest discover tests
 """
 
 import sys
+import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from nodes.io import get_core_hash, render_note, strip_auto_sections
+from core.utils import clean_path
+from nodes.concepts import _normalise_tags
+from nodes.io import get_core_hash, render_note, strip_auto_sections, vault_reader
+from nodes.relations import _resolve_title
 
 CASES = [
     (
@@ -55,42 +60,67 @@ CASES = [
 ]
 
 
-def run():
-    failures = 0
+class TestNoteStrippingAndRendering(unittest.TestCase):
+    def test_strip_auto_sections_cases(self):
+        for name, source, expected in CASES:
+            with self.subTest(case=name):
+                got = strip_auto_sections(source)
+                self.assertEqual(got, expected, f"Failed on case: {name}")
 
-    for name, source, expected in CASES:
-        got = strip_auto_sections(source)
-        if got == expected:
-            print(f"PASS  {name}")
-        else:
-            failures += 1
-            print(f"FAIL  {name}\n   expected: {expected!r}\n   got     : {got!r}")
+    def test_render_and_strip_roundtrip(self):
+        base = "# A\n\nBody.\n\nAppended later by hand."
+        first = render_note(base, ["#x", "#y"], {"B"})
+        second = render_note(strip_auto_sections(first), ["#x", "#y"], {"B"})
+        third = render_note(strip_auto_sections(second), ["#x", "#y"], {"B"})
 
-    def assert_that(name, condition):
-        nonlocal failures
-        if condition:
-            print(f"PASS  {name}")
-        else:
-            failures += 1
-            print(f"FAIL  {name}")
+        self.assertEqual(strip_auto_sections(first), base, "strip(render(x)) == x")
+        self.assertEqual(first, second, "render is stable across runs (1 vs 2)")
+        self.assertEqual(second, third, "render is stable across runs (2 vs 3)")
+        self.assertEqual(get_core_hash(first), get_core_hash(base), "hash ignores auto sections")
+        self.assertNotEqual(
+            get_core_hash(first),
+            get_core_hash(first + "\nnew user text\n"),
+            "hash detects text appended at the bottom",
+        )
+        self.assertIn("[[B]]", first, "wikilinks are rendered without the .md suffix")
 
-    base = "# A\n\nBody.\n\nAppended later by hand."
-    first = render_note(base, ["#x", "#y"], {"B"})
-    second = render_note(strip_auto_sections(first), ["#x", "#y"], {"B"})
-    third = render_note(strip_auto_sections(second), ["#x", "#y"], {"B"})
+    def test_empty_note_rendering(self):
+        self.assertEqual(render_note("", [], set()), "")
+        rendered = render_note("", ["#tag"], None)
+        self.assertTrue(rendered.startswith("## Tags\n"), "No unnecessary leading blank line")
+        self.assertEqual(strip_auto_sections(rendered), "")
 
-    assert_that("strip(render(x)) == x", strip_auto_sections(first) == base)
-    assert_that("render is stable across runs", first == second == third)
-    assert_that("hash ignores the auto sections", get_core_hash(first) == get_core_hash(base))
-    assert_that(
-        "hash detects text appended at the bottom",
-        get_core_hash(first) != get_core_hash(first + "\nnew user text\n"),
-    )
-    assert_that("wikilinks are rendered without the .md suffix", "[[B]]" in first)
 
-    print(f"\n{'FAILED' if failures else 'All tests passed'} ({failures} failure(s))")
-    return 1 if failures else 0
+class TestSanitizationAndNormalization(unittest.TestCase):
+    def test_tag_normalisation(self):
+        raw = ["#machine-learning", "deep learning", "#AI,", "PYTHON!", "#tech/web", ""]
+        cleaned = _normalise_tags(raw)
+        self.assertIn("#machine-learning", cleaned)
+        self.assertIn("#deep-learning", cleaned)
+        self.assertIn("#ai", cleaned)
+        self.assertIn("#python", cleaned)
+        self.assertIn("#tech/web", cleaned)
+        self.assertNotIn("", cleaned)
+
+    def test_resolve_title(self):
+        title_map = {"docker.md": "Docker.md", "kubernetes.md": "Kubernetes.md"}
+        self.assertEqual(_resolve_title("docker", title_map), "Docker.md")
+        self.assertEqual(_resolve_title("Docker.md", title_map), "Docker.md")
+        self.assertEqual(_resolve_title("[[Docker]]", title_map), "Docker.md")
+        self.assertEqual(_resolve_title('"Kubernetes"', title_map), "Kubernetes.md")
+        self.assertEqual(_resolve_title("unknown", title_map), "unknown")
+
+    def test_clean_path(self):
+        self.assertEqual(clean_path('  "C:/Vault"  '), "C:/Vault")
+        self.assertEqual(clean_path("'/some/path'"), "/some/path")
+        self.assertEqual(clean_path(""), "")
+
+    def test_vault_reader_missing_dir(self):
+        with self.assertRaises(ValueError):
+            vault_reader({"dir": ""})
+        with self.assertRaises(ValueError):
+            vault_reader({"dir": "/non/existent/path/for/sure/12345"})
 
 
 if __name__ == "__main__":
-    sys.exit(run())
+    unittest.main()
