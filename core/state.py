@@ -34,8 +34,16 @@ class AgentState(TypedDict):
     new_concepts: List[dict]
     raw_links: List[dict]
     links: List[dict]
+    # Links created during THIS run -- link_writer only rewrites notes that are
+    # new or that gained a link, so this key has to be part of the schema or
+    # LangGraph drops the update and nothing ever gets written.
+    new_links: List[dict]
     dir: str
     cache_path: str
     file_hashes: dict
     raw_tags_by_note: dict
     tags_by_note: dict
+    # When True the pipeline runs normally but never touches the .md files or
+    # the cache -- used by the Streamlit "preview only" mode.
+    dry_run: bool
+    notes_written: int

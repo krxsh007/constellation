@@ -1,102 +1,170 @@
-from pathlib import Path
-import json
 import hashlib
+import json
 import re
+from pathlib import Path
+
+from core.log import log
 from core.state import AgentState
 
+CACHE_FILENAME = ".linker_cache.json"
+# Directories Obsidian / this tool own -- never treat their contents as notes.
+IGNORED_DIRS = {".obsidian", ".trash", ".git", ".linker_faiss_index"}
+
+
+_TAG_LINE = re.compile(r"^#[^\s#]+(?:\s+#[^\s#]+)*$")
+_LINK_LINE = re.compile(r"^-\s*\[\[[^\]]+\]\]$")
+
+
+def _is_auto_line(section: str, stripped: str) -> bool:
+    """True only for lines this tool itself would have written."""
+    if section == "tags":
+        return bool(_TAG_LINE.match(stripped))
+    return bool(_LINK_LINE.match(stripped))
+
+
 def strip_auto_sections(content: str) -> str:
-    """Safely extracts the core content of a markdown note, removing only the ## Tags and 
-    ## Related Links sections (and their contents up to the next root-level heading or EOF),
-    preserving any manually added content below them."""
-    lines = content.splitlines()
+    """Extracts the hand-written part of a note by removing the ## Tags and
+    ## Related Links sections.
+
+    Only lines this tool would have generated (a run of hashtags, or `- [[link]]`
+    bullets) are dropped. The moment something else shows up -- prose, a heading,
+    a code fence -- the section is considered over and everything from there on is
+    kept, so text you add at the bottom of a note survives the next run.
+    """
     in_code_block = False
-    filtered_lines = []
-    skip_mode = False
-    
-    for line in lines:
+    kept = []
+    section = None      # None | "tags" | "links"
+    pending_blanks = []
+
+    def end_section():
+        """Closes an auto-section, leaving exactly one blank line where it was so
+        repeated runs don't accumulate whitespace."""
+        nonlocal section, pending_blanks
+        section = None
+        pending_blanks = []
+        while kept and not kept[-1].strip():
+            kept.pop()
+        if kept:
+            kept.append("")
+
+    for line in content.splitlines():
         stripped = line.strip()
-        if stripped.startswith("```"):
+        is_fence = stripped.startswith("```")
+        if is_fence:
             in_code_block = not in_code_block
-            
-        if not in_code_block:
-            # Check if this line starts an auto-generated section
-            if stripped == "## Tags" or stripped == "## Related Links":
-                skip_mode = True
+
+        # Never interpret markdown structure inside a fenced code block.
+        if in_code_block or is_fence:
+            if section:
+                end_section()
+            kept.append(line)
+            continue
+
+        if stripped == "## Tags":
+            section, pending_blanks = "tags", []
+            continue
+        if stripped == "## Related Links":
+            section, pending_blanks = "links", []
+            continue
+
+        if section:
+            if not stripped:
+                pending_blanks.append(line)
                 continue
-            # If in skip mode, check if we hit the next heading
-            elif skip_mode and re.match(r"^#+\s", stripped):
-                skip_mode = False
-                
-        if not skip_mode:
-            filtered_lines.append(line)
-            
-    return "\n".join(filtered_lines).rstrip()
+            if _is_auto_line(section, stripped):
+                pending_blanks = []
+                continue
+            # Anything else is the user's own content -- stop stripping.
+            end_section()
+
+        kept.append(line)
+
+    return "\n".join(kept).rstrip()
+
 
 def get_core_hash(content: str) -> str:
-    """Returns an MD5 hash of the note content, ignoring Related Links and Tags sections."""
-    core_content = strip_auto_sections(content)
-    return hashlib.md5(core_content.encode('utf-8')).hexdigest()
+    """MD5 of the note content, ignoring the auto-generated Tags/Related Links sections."""
+    return hashlib.md5(strip_auto_sections(content).encode("utf-8")).hexdigest()
+
+
+def iter_notes(directory: Path):
+    """Yields every user-authored .md file in the vault."""
+    for file in directory.rglob("*.md"):
+        if any(part in IGNORED_DIRS for part in file.relative_to(directory).parts[:-1]):
+            continue
+        yield file
+
+
+def count_notes(directory) -> int:
+    directory = Path(directory)
+    if not directory.is_dir():
+        return 0
+    return sum(1 for _ in iter_notes(directory))
+
 
 def vault_reader(state: AgentState):
-    directory_path = state.get("dir", "")
+    directory_path = (state.get("dir") or "").strip()
     if not directory_path:
-        directory_path = input("Please enter your Obsidian vault directory path: ").strip()
-    
+        raise ValueError("No Obsidian vault directory was provided.")
+
     directory = Path(directory_path)
     if not directory.exists() or not directory.is_dir():
         raise ValueError(f"The path '{directory_path}' is not a valid directory.")
-    
-    cache_path = directory / ".linker_cache.json"
-    cache = {"files": {}, "concepts": [], "links": []}
+
+    cache_path = directory / CACHE_FILENAME
+    cache = {"files": {}, "concepts": [], "links": [], "tags": {}}
     if cache_path.exists():
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
                 cache = json.load(f)
         except Exception as e:
-            print(f"Warning: Could not read cache: {e}")
+            log(f"Warning: could not read cache ({e}). Treating the vault as new.")
 
     cached_files = cache.get("files", {})
     all_cached_concepts = cache.get("concepts", [])
     all_cached_links = cache.get("links", [])
     cached_tags = cache.get("tags", {})
-    
+
     notes = []
     new_notes = []
     current_hashes = {}
     current_titles = set()
-    
-    for file in directory.rglob("*.md"):
+
+    for file in iter_notes(directory):
         title = file.name
+        try:
+            content = file.read_text(encoding="utf-8")
+        except Exception as e:
+            log(f"Warning: skipping '{title}' ({e})")
+            continue
+
         current_titles.add(title)
-        
-        content = file.read_text(encoding="utf-8")
         content_hash = get_core_hash(content)
         current_hashes[title] = content_hash
-        
-        note_obj = {
-            "title": title, 
-            "path": str(file.resolve()),
-            "content": content
-        }
+
+        note_obj = {"title": title, "path": str(file.resolve()), "content": content}
         notes.append(note_obj)
-        
+
         if title not in cached_files or cached_files[title].get("hash") != content_hash:
             new_notes.append(note_obj)
-            
+
     valid_titles = current_titles - {n["title"] for n in new_notes}
-    
-    retained_concepts = [c for c in all_cached_concepts if c["source_note"] in valid_titles]
-    retained_links = [l for l in all_cached_links if l.get("from_note") in valid_titles and l.get("to_note") in valid_titles]
+
+    retained_concepts = [c for c in all_cached_concepts if c.get("source_note") in valid_titles]
+    retained_links = [
+        l for l in all_cached_links
+        if l.get("from_note") in valid_titles and l.get("to_note") in valid_titles
+    ]
     retained_tags = {k: v for k, v in cached_tags.items() if k in valid_titles}
 
-    print(f"\n--- [Vault Reader] ---")
-    print(f"Found {len(notes)} notes in vault.")
-    print(f"Notes needing processing: {len(new_notes)}")
+    log("\n--- [Vault Reader] ---")
+    log(f"Found {len(notes)} notes in vault.")
+    log(f"Notes needing processing: {len(new_notes)}")
     if retained_concepts or retained_links or retained_tags:
-        print(f"Loaded {len(retained_concepts)} cached concepts, {len(retained_links)} cached links, and {len(retained_tags)} cached tags.")
-    
+        log(f"Reused {len(retained_concepts)} cached concepts, {len(retained_links)} links, {len(retained_tags)} tag sets.")
+
     return {
-        "notes": notes, 
+        "notes": notes,
         "new_notes": new_notes,
         "dir": str(directory_path),
         "cache_path": str(cache_path),
@@ -107,101 +175,114 @@ def vault_reader(state: AgentState):
         "raw_tags_by_note": {}
     }
 
+
+def render_note(base_content: str, tags, targets) -> str:
+    """Rebuilds a note's text with the auto-generated Tags / Related Links sections."""
+    content = base_content
+    if tags:
+        content += "\n\n## Tags\n" + " ".join(tags)
+    if targets:
+        links_block = "\n".join(f"- [[{t}]]" for t in sorted(targets))
+        content += "\n\n## Related Links\n" + links_block
+    return content + "\n"
+
+
 def link_writer(state: AgentState):
-    print("\n--- [Link Writer] ---")
+    log("\n--- [Link Writer] ---")
+    dry_run = state.get("dry_run", False)
+    if dry_run:
+        log("Preview mode: no files will be modified.")
+
     links = state.get("links", [])
     note_to_path = {n["title"]: n["path"] for n in state.get("notes", [])}
     note_to_content = {n["title"]: n["content"] for n in state.get("notes", [])}
-    
+
     links_by_source = {}
     for link in links:
         from_note = link.get("from_note")
         to_note = link.get("to_note")
-        
         if from_note and to_note:
-            if from_note not in links_by_source:
-                links_by_source[from_note] = set()
+            # Obsidian wikilinks reference the note name without the .md suffix.
             target_title = to_note[:-3] if to_note.lower().endswith(".md") else to_note
-            links_by_source[from_note].add(target_title)
-            
+            links_by_source.setdefault(from_note, set()).add(target_title)
+
     tags_by_note = state.get("tags_by_note", {})
 
+    # Only rewrite notes that changed this run or that gained a link -- untouched
+    # notes keep whatever is already on disk.
     new_notes_titles = {note["title"] for note in state.get("new_notes", [])}
-    new_links = state.get("new_links", [])
-    new_link_sources = {link["from_note"] for link in new_links if link.get("from_note")}
-    allowed_updates = new_notes_titles.union(new_link_sources)
+    new_link_sources = {l["from_note"] for l in state.get("new_links", []) if l.get("from_note")}
+    allowed_updates = new_notes_titles | new_link_sources
 
-    # Gather all notes that need to be updated with links OR tags, filtered to only those modified/updated in this run
-    all_notes_to_update = set(links_by_source.keys()).union(tags_by_note.keys())
-    all_notes_to_update = all_notes_to_update.intersection(allowed_updates)
+    notes_to_update = (set(links_by_source) | set(tags_by_note)) & allowed_updates
 
-    for note_title in all_notes_to_update:
+    written = 0
+    for note_title in sorted(notes_to_update):
         file_path_str = note_to_path.get(note_title)
         original_content = note_to_content.get(note_title)
-        
-        if not file_path_str or not original_content:
-            continue
-            
-        file_path = Path(file_path_str)
-        
-        base_content = strip_auto_sections(original_content)
-        
-        new_content = base_content
-        
-        # Add tags if they exist
-        note_tags = tags_by_note.get(note_title)
-        if note_tags:
-            tags_block = " ".join(note_tags)
-            new_content += f"\n\n## Tags\n{tags_block}"
 
-        # Add links if they exist
+        if not file_path_str or original_content is None:
+            continue
+
+        note_tags = tags_by_note.get(note_title)
         targets = links_by_source.get(note_title)
-        if targets:
-            sorted_targets = sorted(list(targets))
-            links_block = "\n".join(f"- [[{target}]]" for target in sorted_targets)
-            new_content += f"\n\n## Related Links\n{links_block}"
-        
-        new_content += "\n"
-        
+        new_content = render_note(strip_auto_sections(original_content), note_tags, targets)
+
         if new_content == original_content:
             continue
-            
+
+        updates = []
+        if targets:
+            updates.append(f"{len(targets)} links")
+        if note_tags:
+            updates.append(f"{len(note_tags)} tags")
+        summary = " and ".join(updates)
+
+        if dry_run:
+            log(f"Would write {summary} to {note_title}")
+            written += 1
+            continue
+
+        file_path = Path(file_path_str)
         temp_path = file_path.with_suffix(file_path.suffix + ".tmp")
         try:
             temp_path.write_text(new_content, encoding="utf-8")
             temp_path.replace(file_path)
-            
-            updates = []
-            if targets:
-                updates.append(f"{len(targets)} links")
-            if note_tags:
-                updates.append(f"{len(note_tags)} tags")
-            print(f"Successfully wrote {' and '.join(updates)} to {note_title}")
+            written += 1
+            log(f"Wrote {summary} to {note_title}")
         except Exception as e:
             if temp_path.exists():
                 temp_path.unlink()
-            print(f"Failed to write links to {note_title}: {e}")
-            
-    return {}
+            log(f"Failed to write to {note_title}: {e}")
+
+    if not notes_to_update:
+        log("No notes needed updating.")
+
+    return {"notes_written": written}
+
 
 def summary_reporter(state: AgentState):
-    print("\n--- [Summary Reporter] ---")
-    print("Done! Links created:", len(state.get("links", [])))
-    
-    # Save back to cache
+    log("\n--- [Summary Reporter] ---")
+    links = state.get("links", [])
+    log(f"Done. {len(links)} total links, {len(state.get('new_links', []))} created this run.")
+
+    if state.get("dry_run", False):
+        log("Preview mode: cache not written, so the next real run will redo this work.")
+        return {}
+
     cache_path = state.get("cache_path")
     if cache_path:
         cache_data = {
-            "files": {title: {"hash": file_hash} for title, file_hash in state.get("file_hashes", {}).items()},
+            "files": {title: {"hash": h} for title, h in state.get("file_hashes", {}).items()},
             "concepts": state.get("concepts", []),
-            "links": state.get("links", []),
+            "links": links,
             "tags": state.get("tags_by_note", {})
         }
         try:
             with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, indent=2)
-            print(f"Saved cache to {cache_path}")
+            log(f"Saved cache to {cache_path}")
         except Exception as e:
-            print(f"Warning: Failed to save cache: {e}")
-            
+            log(f"Warning: failed to save cache: {e}")
+
     return {}

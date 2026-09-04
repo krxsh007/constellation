@@ -1,11 +1,10 @@
-fastapi
-uvicorn
-pydantic
+streamlit>=1.44
 langgraph
 langchain-core
+langchain-community
 langchain-groq
-langchain-pinecone
-pinecone-client
-neo4j
-python-dotenv
 langchain-google-genai
+faiss-cpu
+pydantic
+python-dotenv
+requests

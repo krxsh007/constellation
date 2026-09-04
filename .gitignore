@@ -29,3 +29,10 @@ Thumbs.db
 
 # Project specific
 .linker_cache.json
+
+# Local vector index (rebuilt from the vault)
+.linker_faiss_index/
+
+# Internal planning and AI config
+.planning/
+.claude/
