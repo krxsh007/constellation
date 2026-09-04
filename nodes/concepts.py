@@ -1,4 +1,5 @@
 import json
+import re
 
 from langchain_core.documents import Document
 
@@ -104,6 +105,10 @@ def _normalise_tags(tags):
     cleaned = []
     for tag in tags:
         tag = str(tag).strip().lstrip("#").strip()
+        if not tag:
+            continue
+        # Remove trailing/leading punctuation often emitted by LLMs (e.g., commas, semicolons)
+        tag = re.sub(r"^[^\w/]+|[^\w/]+$", "", tag)
         if not tag:
             continue
         tag = "#" + "-".join(tag.split()).lower()

@@ -103,11 +103,11 @@ def count_notes(directory) -> int:
 
 
 def vault_reader(state: AgentState):
-    directory_path = (state.get("dir") or "").strip()
+    directory_path = (state.get("dir") or "").strip().strip("'\"").strip()
     if not directory_path:
         raise ValueError("No Obsidian vault directory was provided.")
 
-    directory = Path(directory_path)
+    directory = Path(directory_path).expanduser()
     if not directory.exists() or not directory.is_dir():
         raise ValueError(f"The path '{directory_path}' is not a valid directory.")
 
@@ -137,6 +137,11 @@ def vault_reader(state: AgentState):
         except Exception as e:
             log(f"Warning: skipping '{title}' ({e})")
             continue
+
+        if title in current_titles:
+            rel_str = str(file.relative_to(directory).as_posix())
+            log(f"Warning: duplicate filename '{file.name}' found at '{rel_str}'. Disambiguating note title as '{file.parent.name}/{file.name}'.")
+            title = f"{file.parent.name}/{file.name}"
 
         current_titles.add(title)
         content_hash = get_core_hash(content)
@@ -178,13 +183,15 @@ def vault_reader(state: AgentState):
 
 def render_note(base_content: str, tags, targets) -> str:
     """Rebuilds a note's text with the auto-generated Tags / Related Links sections."""
-    content = base_content
+    content = base_content.rstrip()
+    prefix = "\n\n" if content else ""
     if tags:
-        content += "\n\n## Tags\n" + " ".join(tags)
+        content += prefix + "## Tags\n" + " ".join(tags)
+        prefix = "\n\n"
     if targets:
         links_block = "\n".join(f"- [[{t}]]" for t in sorted(targets))
-        content += "\n\n## Related Links\n" + links_block
-    return content + "\n"
+        content += prefix + "## Related Links\n" + links_block
+    return (content + "\n") if content else ""
 
 
 def link_writer(state: AgentState):

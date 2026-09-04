@@ -26,6 +26,14 @@ class LLMResponseError(ValueError):
     """
 
 
+def clean_path(path: str) -> str:
+    """Strips outer quotes and whitespace, and expands ~ for user directories."""
+    if not path or not str(path).strip():
+        return ""
+    from pathlib import Path
+    return str(Path(str(path).strip().strip("'\"").strip()).expanduser())
+
+
 def get_key_rotation_lock():
     global key_rotation_lock
     if key_rotation_lock is None:
