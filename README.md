@@ -1,14 +1,14 @@
-# 🌌 Constellation
+# Constellation
 
 A local Streamlit app that organizes your Obsidian vault. Point it at a vault folder and it reads your markdown notes, extracts the core concepts with an LLM, then writes Obsidian tags and `[[wikilinks]]` back into the files — turning isolated notes into an interconnected constellation in your graph view.
 
 Everything runs on your machine. The only things that leave it are note contents sent to Groq (for extraction) and Google (for embeddings).
 
-## 📊 Pipeline Graph
+## Pipeline Graph
 
 ![Constellation Pipeline](assets/graph_visualization.png)
 
-## ✨ What it does
+## What it does
 
 - **Concept extraction** — reads each note and pulls out its key ideas, technologies and entities.
 - **Smart tagging** — appends 3–5 relevant hashtags (`#machine-learning`, `#devops`) under a `## Tags` heading.
@@ -18,7 +18,7 @@ Everything runs on your machine. The only things that leave it are note contents
 - **API key rotation** — supply several Groq/Google keys and it rotates through them with exponential backoff when it hits free-tier rate limits.
 - **Preview mode** — run the whole pipeline and see exactly what it would write, without touching a single file.
 
-## 🛠️ Tech stack
+## Tech stack
 
 - **Streamlit** — the local UI.
 - **LangGraph / LangChain** — the 7-node pipeline (read → extract → verify → relate → verify → write → report).
@@ -26,7 +26,7 @@ Everything runs on your machine. The only things that leave it are note contents
 - **Google Generative AI** — concept embeddings (`models/gemini-embedding-2`).
 - **FAISS** — local, on-disk vector index. No cloud database, no account needed.
 
-## 🚀 Setup
+## Setup
 
 1. **Clone the repo** and activate your environment:
    ```bash
@@ -62,7 +62,7 @@ Everything runs on your machine. The only things that leave it are note contents
    ```
    You can also paste keys straight into the app's sidebar instead of using `.env`.
 
-## 🖥️ Usage
+## Usage
 
 ```bash
 streamlit run app.py
@@ -85,7 +85,7 @@ python tests/test_notes.py                 # note read/write round-trip tests
 python tests/test_llm_parsing.py           # LLM response parsing / fallback tests
 ```
 
-## 🧠 How it works
+## How it works
 
 1. **Vault Reader** (`nodes/io.py`) — scans for `.md` files (skipping `.obsidian`, `.trash`, `.git`) and diffs them against `.linker_cache.json` to find new or edited notes.
 2. **Concept Extractor** (`nodes/concepts.py`) — sends new notes to Groq concurrently, extracting structured concepts and tags.
@@ -95,7 +95,7 @@ python tests/test_llm_parsing.py           # LLM response parsing / fallback tes
 6. **Link Writer** (`nodes/io.py`) — rewrites the `## Tags` and `## Related Links` sections of the affected notes via a temp-file swap.
 7. **Summary Reporter** — saves the cache so the next run is cheap.
 
-## ✍️ What it writes to your notes
+## What it writes to your notes
 
 It appends (and thereafter maintains) two sections at the end of a note:
 
@@ -116,6 +116,6 @@ Two files are created inside your vault, both safe to delete (they'll be rebuilt
 
 > **Tip:** back up your vault before the first run. The tool is careful, but it does rewrite files.
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
