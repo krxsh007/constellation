@@ -16,7 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from constellation.core.utils import clean_path
 from constellation.nodes.concepts import _normalise_tags
-from constellation.nodes.io import get_core_hash, render_note, strip_auto_sections, vault_reader
+from constellation.nodes.io import (
+    count_notes,
+    get_core_hash,
+    iter_notes,
+    render_note,
+    strip_auto_sections,
+    vault_reader,
+)
 from constellation.nodes.relations import _resolve_title
 
 CASES = [
@@ -54,6 +61,11 @@ CASES = [
         "a '#' inside a code fence is not treated as a tag",
         "# A\n\n```py\n# not a tag\n```\n\n## Tags\n#x\n",
         "# A\n\n```py\n# not a tag\n```",
+    ),
+    (
+        "annotated links with dashes are stripped",
+        "# A\n\nBody.\n\n## Related Links\n- [[B]] — Core runtime platform\n- [[C]] - Secondary service\n",
+        "# A\n\nBody.",
     ),
     ("a note that is only auto sections becomes empty", "## Tags\n#x\n", ""),
     ("an empty note stays empty", "", ""),
@@ -120,6 +132,62 @@ class TestSanitizationAndNormalization(unittest.TestCase):
             vault_reader({"dir": ""})
         with self.assertRaises(ValueError):
             vault_reader({"dir": "/non/existent/path/for/sure/12345"})
+
+
+class TestNewFeatures(unittest.TestCase):
+    def test_max_links_cap(self):
+        targets = ["NoteA", "NoteB", "NoteC", "NoteD", "NoteE"]
+        rendered = render_note("# Root", tags=None, targets=targets, max_links=2)
+        self.assertIn("- [[NoteA]]", rendered)
+        self.assertIn("- [[NoteB]]", rendered)
+        self.assertNotIn("- [[NoteC]]", rendered)
+        self.assertNotIn("- [[NoteD]]", rendered)
+
+    def test_annotated_links_rendering(self):
+        targets = [
+            {"target": "Docker", "evidence": "Platform for containers"},
+            {"target": "Kubernetes", "evidence": ""},
+        ]
+        rendered = render_note("# Root", tags=None, targets=targets, annotate=True)
+        self.assertIn("- [[Docker]] — Platform for containers", rendered)
+        self.assertIn("- [[Kubernetes]]", rendered)
+
+    def test_folder_exclusion(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+            (tmppath / "Root.md").write_text("Hello", encoding="utf-8")
+            (tmppath / "Sub").mkdir()
+            (tmppath / "Sub" / "Child.md").write_text("World", encoding="utf-8")
+            (tmppath / "Templates").mkdir()
+            (tmppath / "Templates" / "DailyTpl.md").write_text("Template", encoding="utf-8")
+            (tmppath / "Archive").mkdir()
+            (tmppath / "Archive" / "Old.md").write_text("Old", encoding="utf-8")
+
+            excluded = ["Templates", "Archive"]
+            found = [f.name for f in iter_notes(tmppath, excluded_dirs=excluded)]
+            self.assertIn("Root.md", found)
+            self.assertIn("Child.md", found)
+            self.assertNotIn("DailyTpl.md", found)
+            self.assertNotIn("Old.md", found)
+            self.assertEqual(count_notes(tmppath, excluded_dirs=excluded), 2)
+
+    def test_cli_arg_parsing(self):
+        from main import parse_args
+        args = parse_args([
+            "/my/vault",
+            "--dry-run",
+            "--force",
+            "--max-links", "3",
+            "--annotate",
+            "--exclude", "Templates,Archive",
+        ])
+        self.assertEqual(args.vault, "/my/vault")
+        self.assertTrue(args.dry_run)
+        self.assertTrue(args.force)
+        self.assertEqual(args.max_links, 3)
+        self.assertTrue(args.annotate)
+        self.assertEqual(args.exclude, "Templates,Archive")
 
 
 if __name__ == "__main__":

@@ -79,13 +79,90 @@ def run_pipeline(vault_dir: str, dry_run: bool = False) -> dict:
     return asyncio.run(arun_pipeline(vault_dir, dry_run))
 
 
-if __name__ == "__main__":
+def parse_args(argv=None):
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(
+        description="Constellation: Autonomous Obsidian Knowledge Graph Generator",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "vault",
+        nargs="?",
+        default=os.getenv("OBSIDIAN_VAULT_DIR", ""),
+        help="Path to the Obsidian vault directory (or use --vault).",
+    )
+    parser.add_argument(
+        "--vault",
+        dest="vault_flag",
+        default=None,
+        help="Path to the Obsidian vault directory.",
+    )
+    parser.add_argument(
+        "-n", "--dry-run", "--preview",
+        dest="dry_run",
+        action="store_true",
+        help="Preview changes without modifying vault notes or cache.",
+    )
+    parser.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="Force full re-processing by deleting cache and FAISS index.",
+    )
+    parser.add_argument(
+        "--max-links",
+        type=int,
+        default=None,
+        help=f"Maximum wikilinks to append per note (default: {config.MAX_LINKS_PER_NOTE}).",
+    )
+    parser.add_argument(
+        "--annotate",
+        action="store_true",
+        help="Append reasoning annotations to wikilinks: - [[Target]] — reason.",
+    )
+    parser.add_argument(
+        "--exclude",
+        type=str,
+        default=None,
+        help="Comma-separated vault folders to exclude (e.g. 'Templates,Archive').",
+    )
+    return parser.parse_args(argv)
+
+
+def cli(argv=None):
     import os
     import sys
+    from constellation.nodes.io import reset_vault_state
 
-    vault = sys.argv[1] if len(sys.argv) > 1 else os.getenv("OBSIDIAN_VAULT_DIR", "")
+    args = parse_args(argv)
+    vault = args.vault_flag or args.vault
     if not vault:
         vault = input("Please enter your Obsidian vault directory path: ").strip()
 
-    final_state = run_pipeline(vault)
-    print(f"\nNotes updated: {final_state.get('notes_written', 0)}")
+    if args.max_links is not None:
+        config.set_max_links(args.max_links)
+    if args.annotate:
+        config.set_annotate_links(True)
+    if args.exclude is not None:
+        config.set_excluded_dirs(args.exclude)
+
+    vault_path = utils.clean_path(vault)
+    if not vault_path or not os.path.isdir(vault_path):
+        print(f"Error: '{vault}' is not a valid directory.")
+        sys.exit(1)
+
+    if args.force:
+        res = reset_vault_state(vault_path)
+        print(f"Force re-processing requested. Reset: {res}")
+
+    print(f"Running Constellation on: {vault_path}")
+    if args.dry_run:
+        print("[Preview mode: no files will be written]")
+
+    final_state = run_pipeline(vault_path, dry_run=args.dry_run)
+    print(f"\nFinished. Notes updated: {final_state.get('notes_written', 0)}")
+
+
+if __name__ == "__main__":
+    cli()

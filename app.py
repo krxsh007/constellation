@@ -14,7 +14,7 @@ st.set_page_config(page_title="Constellation", page_icon="🌌", layout="wide")
 from constellation.core import config, log as logmod, vectorstore
 from constellation.core.utils import clean_path
 from main import run_pipeline
-from constellation.nodes.io import CACHE_FILENAME, count_notes
+from constellation.nodes.io import CACHE_FILENAME, count_notes, reset_vault_state
 
 VAULT_KEY = "vault_path"
 
@@ -42,21 +42,6 @@ def vault_stats(path: str) -> dict:
         "processed": processed,
         "indexed": vectorstore.index_exists(str(vault)),
     }
-
-
-def reset_vault_state(path: str) -> str:
-    """Deletes the cache and FAISS index so the next run re-processes everything."""
-    vault = Path(clean_path(path))
-    removed = []
-    cache = vault / CACHE_FILENAME
-    if cache.exists():
-        cache.unlink()
-        removed.append(CACHE_FILENAME)
-    index = vectorstore.index_path(str(vault))
-    if index.exists():
-        shutil.rmtree(index, ignore_errors=True)
-        removed.append(vectorstore.INDEX_DIRNAME)
-    return ", ".join(removed) if removed else "nothing to reset"
 
 
 def parse_keys(text: str):
@@ -140,6 +125,27 @@ if valid:
             value=False,
             help="By default only new or edited notes cost API calls.",
         )
+        max_links = st.slider(
+            "Max links per note",
+            min_value=1,
+            max_value=20,
+            value=config.MAX_LINKS_PER_NOTE,
+            help="Maximum number of wikilinks to write to any single note.",
+        )
+        annotate_links = st.checkbox(
+            "Annotate links with reasoning",
+            value=config.ANNOTATE_LINKS,
+            help="Appends a concise explanation after each wikilink: - [[Target]] — reason",
+        )
+        excluded_dirs_val = st.text_input(
+            "Excluded folders",
+            value=", ".join(config.EXCLUDED_DIRS),
+            help="Comma-separated list of vault folder names to ignore (e.g. Templates, Archive, Daily Notes).",
+        )
+
+    config.set_max_links(max_links)
+    config.set_annotate_links(annotate_links)
+    config.set_excluded_dirs(excluded_dirs_val)
 
     st.info(
         "Constellation appends a `## Tags` and `## Related Links` section to your notes. "

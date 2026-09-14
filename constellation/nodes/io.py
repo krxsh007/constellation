@@ -3,6 +3,7 @@ import json
 import re
 from pathlib import Path
 
+from constellation.core import config
 from constellation.core.log import log
 from constellation.core.state import AgentState
 
@@ -12,7 +13,7 @@ IGNORED_DIRS = {".obsidian", ".trash", ".git", ".linker_faiss_index"}
 
 
 _TAG_LINE = re.compile(r"^#[^\s#]+(?:\s+#[^\s#]+)*$")
-_LINK_LINE = re.compile(r"^-\s*\[\[[^\]]+\]\]$")
+_LINK_LINE = re.compile(r"^-\s*\[\[[^\]]+\]\](?:\s*(?:[—–-]|:)\s*.*)?$")
 
 
 def _is_auto_line(section: str, stripped: str) -> bool:
@@ -87,19 +88,48 @@ def get_core_hash(content: str) -> str:
     return hashlib.md5(strip_auto_sections(content).encode("utf-8")).hexdigest()
 
 
-def iter_notes(directory: Path):
-    """Yields every user-authored .md file in the vault."""
+def iter_notes(directory: Path, excluded_dirs=None):
+    """Yields every user-authored .md file in the vault, filtering out internal and excluded folders."""
+    directory = Path(directory)
+    if excluded_dirs is None:
+        excluded_dirs = config.EXCLUDED_DIRS
+
+    excluded_patterns = {d.strip().lower().rstrip("/\\") for d in excluded_dirs if d and d.strip()}
+    ignored_patterns = {d.lower() for d in IGNORED_DIRS}
+
     for file in directory.rglob("*.md"):
-        if any(part in IGNORED_DIRS for part in file.relative_to(directory).parts[:-1]):
+        rel_parts = [p.lower() for p in file.relative_to(directory).parts[:-1]]
+        if any(part in ignored_patterns for part in rel_parts):
+            continue
+        if any(part in excluded_patterns for part in rel_parts):
+            continue
+        rel_posix = file.relative_to(directory).parent.as_posix().lower()
+        if any(rel_posix == pat or rel_posix.startswith(pat + "/") for pat in excluded_patterns):
             continue
         yield file
 
 
-def count_notes(directory) -> int:
+def count_notes(directory, excluded_dirs=None) -> int:
     directory = Path(directory)
     if not directory.is_dir():
         return 0
-    return sum(1 for _ in iter_notes(directory))
+    return sum(1 for _ in iter_notes(directory, excluded_dirs=excluded_dirs))
+
+
+def reset_vault_state(vault_path: str) -> str:
+    """Deletes the cache and FAISS index so the next run re-processes everything."""
+    import shutil
+    vault = Path(vault_path).expanduser()
+    removed = []
+    cache = vault / CACHE_FILENAME
+    if cache.exists():
+        cache.unlink()
+        removed.append(CACHE_FILENAME)
+    index = vault / ".linker_faiss_index"
+    if index.exists():
+        shutil.rmtree(index, ignore_errors=True)
+        removed.append(".linker_faiss_index")
+    return ", ".join(removed) if removed else "nothing to reset"
 
 
 def vault_reader(state: AgentState):
@@ -181,7 +211,13 @@ def vault_reader(state: AgentState):
     }
 
 
-def render_note(base_content: str, tags, targets) -> str:
+def render_note(
+    base_content: str,
+    tags=None,
+    targets=None,
+    max_links: int = None,
+    annotate: bool = None,
+) -> str:
     """Rebuilds a note's text with the auto-generated Tags / Related Links sections."""
     content = base_content.rstrip()
     prefix = "\n\n" if content else ""
@@ -189,8 +225,47 @@ def render_note(base_content: str, tags, targets) -> str:
         content += prefix + "## Tags\n" + " ".join(tags)
         prefix = "\n\n"
     if targets:
-        links_block = "\n".join(f"- [[{t}]]" for t in sorted(targets))
-        content += prefix + "## Related Links\n" + links_block
+        if max_links is None:
+            max_links = config.MAX_LINKS_PER_NOTE
+        if annotate is None:
+            annotate = config.ANNOTATE_LINKS
+
+        # Normalize targets into list of (target_title, evidence)
+        target_items = []
+        for t in targets:
+            if isinstance(t, str):
+                target_items.append((t, ""))
+            elif isinstance(t, dict):
+                target_items.append((t.get("target", ""), t.get("evidence", "")))
+            elif isinstance(t, (tuple, list)):
+                target_items.append((t[0], t[1] if len(t) > 1 else ""))
+
+        # Deduplicate targets while preserving evidence
+        seen_targets = {}
+        for target_title, evidence in target_items:
+            if not target_title:
+                continue
+            clean_evidence = (evidence or "").strip().replace("\n", " ")
+            if target_title not in seen_targets:
+                seen_targets[target_title] = clean_evidence
+            elif not seen_targets[target_title] and clean_evidence:
+                seen_targets[target_title] = clean_evidence
+
+        # Sort alphabetically by note title
+        sorted_targets = sorted(seen_targets.items(), key=lambda x: x[0])
+
+        if max_links and max_links > 0:
+            sorted_targets = sorted_targets[:max_links]
+
+        lines = []
+        for target_title, evidence in sorted_targets:
+            if annotate and evidence:
+                lines.append(f"- [[{target_title}]] — {evidence}")
+            else:
+                lines.append(f"- [[{target_title}]]")
+
+        if lines:
+            content += prefix + "## Related Links\n" + "\n".join(lines)
     return (content + "\n") if content else ""
 
 
@@ -211,7 +286,8 @@ def link_writer(state: AgentState):
         if from_note and to_note:
             # Obsidian wikilinks reference the note name without the .md suffix.
             target_title = to_note[:-3] if to_note.lower().endswith(".md") else to_note
-            links_by_source.setdefault(from_note, set()).add(target_title)
+            evidence = link.get("evidence", "")
+            links_by_source.setdefault(from_note, []).append({"target": target_title, "evidence": evidence})
 
     tags_by_note = state.get("tags_by_note", {})
 
@@ -232,7 +308,20 @@ def link_writer(state: AgentState):
             continue
 
         note_tags = tags_by_note.get(note_title)
-        targets = links_by_source.get(note_title)
+        raw_targets = links_by_source.get(note_title, [])
+
+        # Deduplicate and cap targets
+        seen = {}
+        for item in raw_targets:
+            t = item["target"]
+            ev = item.get("evidence", "")
+            if t not in seen or (not seen[t] and ev):
+                seen[t] = ev
+        sorted_targets = sorted(seen.items(), key=lambda x: x[0])
+        if config.MAX_LINKS_PER_NOTE > 0:
+            sorted_targets = sorted_targets[:config.MAX_LINKS_PER_NOTE]
+        targets = [{"target": t, "evidence": ev} for t, ev in sorted_targets]
+
         new_content = render_note(strip_auto_sections(original_content), note_tags, targets)
 
         if new_content == original_content:

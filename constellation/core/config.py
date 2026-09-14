@@ -50,6 +50,18 @@ LLM_CONCURRENCY = int(os.getenv("LLM_CONCURRENCY", "2"))
 # leave the parameter off the request entirely.
 LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "low").strip()
 
+# Maximum wikilinks written to each note (0 or negative disables cap).
+MAX_LINKS_PER_NOTE = int(os.getenv("MAX_LINKS_PER_NOTE", "5"))
+
+# Whether to append reasoning to wikilinks: "- [[Target]] — reason"
+ANNOTATE_LINKS = os.getenv("ANNOTATE_LINKS", "false").strip().lower() in ("true", "1", "yes")
+
+# Vault folders to ignore (e.g. Templates, Archive, Daily Notes)
+def _parse_list_env(val: str) -> List[str]:
+    return [item.strip() for item in val.split(",") if item.strip()]
+
+EXCLUDED_DIRS: List[str] = _parse_list_env(os.getenv("EXCLUDED_DIRS", ""))
+
 
 def _dedupe(keys: List[str]) -> List[str]:
     seen = set()
@@ -90,6 +102,24 @@ def set_models(extraction: str = None, verification: str = None, relationship: s
         LLM_VERIFICATION = _resolve_llm_model(verification)
     if relationship:
         LLM_RELATIONSHIP = _resolve_llm_model(relationship)
+
+
+def set_excluded_dirs(dirs) -> None:
+    global EXCLUDED_DIRS
+    if isinstance(dirs, str):
+        EXCLUDED_DIRS = _parse_list_env(dirs)
+    else:
+        EXCLUDED_DIRS = [str(d).strip() for d in dirs if str(d).strip()]
+
+
+def set_max_links(val: int) -> None:
+    global MAX_LINKS_PER_NOTE
+    MAX_LINKS_PER_NOTE = int(val)
+
+
+def set_annotate_links(val: bool) -> None:
+    global ANNOTATE_LINKS
+    ANNOTATE_LINKS = bool(val)
 
 
 current_google_key_index = 0
@@ -150,11 +180,13 @@ embeddings = RotatingGoogleEmbeddings()
 
 
 def describe_config() -> str:
+    excluded_str = ", ".join(EXCLUDED_DIRS) if EXCLUDED_DIRS else "none"
     return (
         f"Extraction: {LLM_EXTRACTION} | Verification: {LLM_VERIFICATION} | "
         f"Relationship: {LLM_RELATIONSHIP} | Embeddings: {EMBEDDING_MODEL}\n"
         f"Output budget: {LLM_MAX_OUTPUT_TOKENS} tokens | Note cap: {LLM_MAX_NOTE_CHARS} chars"
         f"{f' | Reasoning effort: {LLM_REASONING_EFFORT}' if LLM_REASONING_EFFORT else ''}\n"
+        f"Max links/note: {MAX_LINKS_PER_NOTE} | Annotate: {ANNOTATE_LINKS} | Excluded dirs: {excluded_str}\n"
         f"{len(GROQ_API_KEYS)} Groq key(s), {len(GOOGLE_API_KEYS)} Google key(s) loaded for rotation."
     )
 

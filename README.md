@@ -36,7 +36,11 @@ Everything runs on your machine. The only things that leave it are note contents
    ```bash
    pip install -r requirements.txt
    ```
-3. **Add your API keys** to a `.env` file in the project root. Multiple keys of the same type are rotated automatically:
+3. **Add your API keys** by copying the template file to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+   Fill in your keys in `.env`. Multiple keys of the same type are rotated automatically:
    ```env
    # Groq (extraction, verification, relationships)
    GROQ_API_KEY_1="gsk_..."
@@ -45,20 +49,10 @@ Everything runs on your machine. The only things that leave it are note contents
    # Google (embeddings)
    GOOGLE_API_KEY_1="AIza..."
 
-   # Optional model overrides
-   LLM_MODEL="openai/gpt-oss-120b"
-   LLM_EXTRACTION="openai/gpt-oss-20b"
-   LLM_VERIFICATION="openai/gpt-oss-20b"
-   LLM_RELATIONSHIP="openai/gpt-oss-120b"
-
-   # Optional Groq free-tier tuning.
-   # Budget rule: (LLM_MAX_NOTE_CHARS / 4) + LLM_MAX_OUTPUT_TOKENS < ~8000 TPM.
-   # The gpt-oss models are reasoning models -- their thinking tokens come out of
-   # LLM_MAX_OUTPUT_TOKENS, so too small a budget returns an empty completion.
-   LLM_MAX_OUTPUT_TOKENS="2048"
-   LLM_MAX_NOTE_CHARS="12000"
-   LLM_CONCURRENCY="2"
-   LLM_REASONING_EFFORT="low"   # low | medium | high, or "" to omit the parameter
+   # Folder exclusions and linking controls
+   EXCLUDED_DIRS="Templates,Archive,Daily Notes"
+   MAX_LINKS_PER_NOTE=5
+   ANNOTATE_LINKS=false
    ```
    You can also paste keys straight into the app's sidebar instead of using `.env`.
 
@@ -70,19 +64,27 @@ streamlit run app.py
 
 Paste the full path to your vault (e.g. `C:\Users\saraf\Documents\VOID`), then hit **Run linker**. Progress streams live, and when it finishes you get tables of every link, tag and concept it produced.
 
-Two options worth knowing:
-
-- **Preview only** — runs everything but writes nothing. Good for a first look.
-- **Re-process every note** — clears the cache and concept index so the whole vault is rebuilt from scratch.
+Options available in the UI and CLI:
+- **Preview only (`--dry-run` / `-n`)** — runs everything but writes nothing. Good for a first look.
+- **Re-process every note (`--force` / `-f`)** — clears the cache and concept index so the whole vault is rebuilt from scratch.
+- **Max links per note (`--max-links N`)** — caps the number of wikilinks appended to any single note (default: 5).
+- **Annotated links (`--annotate`)** — appends reasoning to wikilinks (`- [[Target]] — reason`).
+- **Folder exclusions (`--exclude`)** — ignores specific folders such as `Templates/`, `Archive/`, or `Daily Notes/`.
 
 Prefer the terminal?
 
 ```bash
-python main.py "C:/path/to/vault"          # or: python scripts/run_local.py "C:/path/to/vault"
-python scripts/monitor_keys.py             # check rate-limit headroom on every key
-python -m unittest discover tests          # run entire test suite
-python tests/test_notes.py                 # note read/write round-trip tests
-python tests/test_llm_parsing.py           # LLM response parsing / fallback tests
+# Basic run
+python main.py "C:/path/to/vault"
+
+# Preview run with folder exclusions and annotated links
+python main.py "C:/path/to/vault" --dry-run --annotate --exclude "Templates,Archive"
+
+# Check rate-limit headroom on every key
+python scripts/monitor_keys.py
+
+# Run test suite
+python -m unittest discover tests
 ```
 
 ## How it works
@@ -105,9 +107,10 @@ It appends (and thereafter maintains) two sections at the end of a note:
 
 ## Related Links
 - [[Kubernetes Orchestration]]
+- [[Docker]] — Container runtime and deployment platform
 ```
 
-Only lines the tool itself generated — a run of hashtags, or `- [[link]]` bullets — are ever replaced. As soon as it hits anything else (your prose, a heading, a code fence) it stops and leaves the rest of the file alone, so notes you keep editing by hand are safe. `tests/test_notes.py` covers this.
+Only lines the tool itself generated — a run of hashtags, or `- [[link]]` bullets (with or without reasoning annotations) — are ever replaced. As soon as it hits anything else (your prose, a heading, a code fence) it stops and leaves the rest of the file alone, so notes you keep editing by hand are safe. `tests/test_notes.py` covers this.
 
 Two files are created inside your vault, both safe to delete (they'll be rebuilt):
 
