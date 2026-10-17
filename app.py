@@ -16,8 +16,10 @@ import streamlit as st
 st.set_page_config(page_title="Constellation", page_icon="🌌", layout="wide")
 
 from constellation.core import config, log as logmod, vectorstore
+from constellation.core.backup import list_backups, restore_backup
+from constellation.core.lock import VaultLockedError
 from constellation.core.utils import clean_path
-from constellation.nodes.io import CACHE_FILENAME, count_notes, reset_vault_state
+from constellation.nodes.io import CACHE_FILENAME, count_notes, reset_vault_state, strip_vault
 from constellation.ui import helpers
 
 
@@ -30,8 +32,8 @@ def init_state() -> None:
         "opt_max_links": max(1, min(20, config.MAX_LINKS_PER_NOTE or 5)),
         "opt_annotate": config.ANNOTATE_LINKS,
         "opt_excluded": ", ".join(config.EXCLUDED_DIRS),
-        "opt_backlinks": bool(getattr(config, "BACKLINKS", False)),
-        "opt_tags_fm": bool(getattr(config, "TAGS_IN_FRONTMATTER", False)),
+        "opt_backlinks": config.BACKLINKS,
+        "opt_tags_fm": config.TAGS_IN_FRONTMATTER,
     }
     for k, v in defaults.items():
         st.session_state.setdefault(k, v)
@@ -61,23 +63,19 @@ def _pill(name: str, n: int, needed: bool) -> str:
 
 
 def render_sidebar() -> None:
-    providers_ok = hasattr(config, "set_providers")
     with st.sidebar:
         st.header("🌌 Constellation")
 
-        llm_provider = getattr(config, "LLM_PROVIDER", "groq")
-        emb_provider = getattr(config, "EMBEDDING_PROVIDER", "google")
+        llm_provider = config.LLM_PROVIDER
+        emb_provider = config.EMBEDDING_PROVIDER
         with st.expander("Providers"):
-            if providers_ok:
-                llms, embs = ["groq", "ollama"], ["google", "ollama"]
-                llm_provider = st.selectbox(
-                    "LLM provider", llms, index=llms.index(llm_provider) if llm_provider in llms else 0)
-                emb_provider = st.selectbox(
-                    "Embedding provider", embs, index=embs.index(emb_provider) if emb_provider in embs else 0)
-                if "ollama" in (llm_provider, emb_provider):
-                    st.caption(f"Ollama at `{getattr(config, 'OLLAMA_BASE_URL', 'http://localhost:11434')}`")
-            else:
-                st.caption("Provider selection: unavailable in this build.")
+            llms, embs = ["groq", "ollama"], ["google", "ollama"]
+            llm_provider = st.selectbox(
+                "LLM provider", llms, index=llms.index(llm_provider) if llm_provider in llms else 0)
+            emb_provider = st.selectbox(
+                "Embedding provider", embs, index=embs.index(emb_provider) if emb_provider in embs else 0)
+            if "ollama" in (llm_provider, emb_provider):
+                st.caption(f"Ollama at `{config.OLLAMA_BASE_URL}` — runs fully on this machine.")
 
         with st.expander("API keys"):
             st.caption("Separate several keys with commas; extras rotate on rate limits.")
@@ -95,23 +93,12 @@ def render_sidebar() -> None:
     if parse_keys(google_input):
         config.set_google_keys(parse_keys(google_input) + config.GOOGLE_API_KEYS)
     config.set_models(ext, ver, rel)
-    if providers_ok:
-        config.set_providers(llm=llm_provider, embeddings=emb_provider)
+    config.set_providers(llm=llm_provider, embeddings=emb_provider)
 
     with st.sidebar:
         st.markdown(_pill("Groq", len(config.GROQ_API_KEYS), llm_provider == "groq"), unsafe_allow_html=True)
         st.markdown(_pill("Google", len(config.GOOGLE_API_KEYS), emb_provider == "google"),
                     unsafe_allow_html=True)
-
-
-def missing_keys_for_run() -> list:
-    """Missing keys, taking the selected providers into account."""
-    missing = list(config.missing_keys())
-    if getattr(config, "LLM_PROVIDER", "groq") == "ollama" and "Groq" in missing:
-        missing.remove("Groq")
-    if getattr(config, "EMBEDDING_PROVIDER", "google") == "ollama" and "Google" in missing:
-        missing.remove("Google")
-    return missing
 
 
 # --------------------------------------------------------------------------- #
@@ -175,10 +162,10 @@ def render_options() -> None:
             st.checkbox("Annotate links with reasoning", key="opt_annotate")
         with right:
             st.markdown("**Output**")
-            bl = hasattr(config, "set_backlinks")
-            st.checkbox("Write backlinks" + ("" if bl else " (unavailable)"), key="opt_backlinks", disabled=not bl)
-            fm = hasattr(config, "set_tags_in_frontmatter")
-            st.checkbox("Tags in frontmatter" + ("" if fm else " (unavailable)"), key="opt_tags_fm", disabled=not fm)
+            st.checkbox("Write backlinks", key="opt_backlinks",
+                        help="Every link A → B also adds B → A.")
+            st.checkbox("Tags in frontmatter", key="opt_tags_fm",
+                        help="Write tags to the YAML `tags:` list instead of a `## Tags` section.")
             st.markdown("**Scope**")
             st.text_input("Excluded folders (comma-separated)", key="opt_excluded",
                           help="e.g. Templates, Archive, Daily Notes")
@@ -189,18 +176,12 @@ def apply_options() -> None:
     config.set_max_links(s["opt_max_links"])
     config.set_annotate_links(s["opt_annotate"])
     config.set_excluded_dirs(s["opt_excluded"])
-    if hasattr(config, "set_backlinks"):
-        config.set_backlinks(bool(s["opt_backlinks"]))
-    if hasattr(config, "set_tags_in_frontmatter"):
-        config.set_tags_in_frontmatter(bool(s["opt_tags_fm"]))
+    config.set_backlinks(bool(s["opt_backlinks"]))
+    config.set_tags_in_frontmatter(bool(s["opt_tags_fm"]))
 
 
 def show_error(e: Exception) -> None:
-    try:
-        from constellation.core.lock import VaultLockedError
-    except ImportError:
-        VaultLockedError = None
-    if VaultLockedError is not None and isinstance(e, VaultLockedError):
+    if isinstance(e, VaultLockedError):
         st.error("Another run is in progress on this vault. Wait for it to finish and try again.")
     else:
         st.error(f"Something went wrong: {e}")
@@ -212,7 +193,7 @@ def execute_run(path: str) -> None:
     """Runs the pipeline with live stage tracking and stores the result."""
     from main import run_pipeline
 
-    missing = missing_keys_for_run()
+    missing = config.missing_keys()
     if missing:
         st.error(f"Missing API key(s): {', '.join(missing)}. Add them in the sidebar or `.env`.")
         return
@@ -398,11 +379,6 @@ def render_graph_tab() -> None:
 def render_backups(path: str) -> None:
     st.subheader("Backups")
     try:
-        from constellation.core.backup import list_backups, restore_backup
-    except ImportError:
-        st.warning("Backups: unavailable in this build.")
-        return
-    try:
         backups = list_backups(path)
     except Exception as e:
         show_error(e)
@@ -423,14 +399,10 @@ def render_backups(path: str) -> None:
 
 def render_strip(path: str) -> None:
     st.subheader("Remove everything Constellation wrote")
-    st.caption("Strips the `## Tags` / `## Related Links` sections Constellation added to your notes.")
+    st.caption("Strips the `## Tags` / `## Related Links` sections and frontmatter tags Constellation added, "
+               "and deletes its cache and index. A backup is taken first, so this can be restored above.")
     confirm = st.checkbox("I understand this edits my notes", key="confirm_strip")
     if not st.button("Strip Constellation output", disabled=not confirm):
-        return
-    try:
-        from constellation.nodes.io import strip_vault
-    except ImportError:
-        st.warning("Strip: unavailable in this build.")
         return
     try:
         res = strip_vault(path, dry_run=False)
