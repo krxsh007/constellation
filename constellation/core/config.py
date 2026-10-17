@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from langchain_core.embeddings import Embeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+from constellation.core import usage
 from constellation.core.log import log
 
 load_dotenv()
@@ -124,6 +125,10 @@ def set_annotate_links(val: bool) -> None:
 
 current_google_key_index = 0
 
+# Texts per embedding request, and the first retry delay (doubles each attempt).
+EMBED_BATCH_SIZE = int(os.getenv("EMBED_BATCH_SIZE", "50"))
+EMBED_BASE_DELAY = 2.0
+
 
 class RotatingGoogleEmbeddings(Embeddings):
     """Google embeddings with retry, exponential backoff and API key rotation."""
@@ -145,18 +150,45 @@ class RotatingGoogleEmbeddings(Embeddings):
         return GoogleGenerativeAIEmbeddings(model=self.model_name, google_api_key=key)
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        # Call embed_query for each text to guarantee we get exactly one embedding per text,
-        # avoiding the langchain-google-genai batch embedding bug in this environment.
-        return [self.embed_query(text) for text in texts]
+        """Embeds in batches of EMBED_BATCH_SIZE; one request per batch instead of
+        one per text.
+
+        Some langchain-google-genai versions return the wrong number of vectors
+        for a batch, so a batch that errors or comes back the wrong length falls
+        back to one request per text -- correctness first, speed when possible.
+        """
+        texts = list(texts)
+        vectors: List[List[float]] = []
+        for start in range(0, len(texts), EMBED_BATCH_SIZE):
+            chunk = texts[start:start + EMBED_BATCH_SIZE]
+            try:
+                result = self._with_retry(lambda inst: inst.embed_documents(chunk))
+                if len(result) != len(chunk):
+                    raise ValueError(f"expected {len(chunk)} vectors, got {len(result)}")
+                vectors.extend(result)
+            except Exception as e:
+                log(f"  Batch embedding failed ({str(e)[:160]}). Falling back to one request per text...")
+                vectors.extend(self.embed_query(text) for text in chunk)
+        return vectors
 
     def embed_query(self, text: str) -> List[float]:
+        return self._with_retry(lambda inst: inst.embed_query(text))
+
+    def _with_retry(self, call):
+        """Runs call(client) with key rotation on rate limits and exponential backoff.
+
+        Blocking (time.sleep) by design: callers in async nodes run embedding in a
+        worker thread via asyncio.to_thread, so this never stalls the event loop.
+        """
         global current_google_key_index
         max_retries = max(len(GOOGLE_API_KEYS), 5)
-        base_delay = 2.0
+        base_delay = EMBED_BASE_DELAY
 
         for attempt in range(max_retries):
             try:
-                return self._get_embedding_instance().embed_query(text)
+                result = call(self._get_embedding_instance())
+                usage.record_embedding_call()
+                return result
             except Exception as e:
                 err_msg = str(e).lower()
                 if "rate limit" in err_msg or "429" in err_msg or "resource_exhausted" in err_msg:

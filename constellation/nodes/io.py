@@ -97,7 +97,9 @@ def iter_notes(directory: Path, excluded_dirs=None):
     excluded_patterns = {d.strip().lower().rstrip("/\\") for d in excluded_dirs if d and d.strip()}
     ignored_patterns = {d.lower() for d in IGNORED_DIRS}
 
-    for file in directory.rglob("*.md"):
+    # rglob order depends on the filesystem; sorting keeps duplicate-filename
+    # disambiguation (first one wins the bare title) stable between runs.
+    for file in sorted(directory.rglob("*.md")):
         rel_parts = [p.lower() for p in file.relative_to(directory).parts[:-1]]
         if any(part in ignored_patterns for part in rel_parts):
             continue
@@ -183,14 +185,26 @@ def vault_reader(state: AgentState):
         if title not in cached_files or cached_files[title].get("hash") != content_hash:
             new_notes.append(note_obj)
 
-    valid_titles = current_titles - {n["title"] for n in new_notes}
+    reprocessed = {n["title"] for n in new_notes}
+    valid_titles = current_titles - reprocessed
 
     retained_concepts = [c for c in all_cached_concepts if c.get("source_note") in valid_titles]
+    # Only links FROM re-processed notes are regenerated. A link A->B where B was
+    # edited is still valid as long as A is unchanged and B exists, so keep it.
     retained_links = [
         l for l in all_cached_links
-        if l.get("from_note") in valid_titles and l.get("to_note") in valid_titles
+        if l.get("from_note") in valid_titles and l.get("to_note") in current_titles
     ]
     retained_tags = {k: v for k, v in cached_tags.items() if k in valid_titles}
+
+    previous_rendered = cache.get("rendered")
+    if not isinstance(previous_rendered, dict):
+        # Caches written before "rendered" existed: reconstruct what was most
+        # likely written from the cached links.
+        previous_rendered = {
+            src: [item["target"] for item in items]
+            for src, items in build_effective_links(all_cached_links).items()
+        }
 
     log("\n--- [Vault Reader] ---")
     log(f"Found {len(notes)} notes in vault.")
@@ -207,8 +221,81 @@ def vault_reader(state: AgentState):
         "concepts": retained_concepts,
         "links": retained_links,
         "tags_by_note": retained_tags,
-        "raw_tags_by_note": {}
+        "raw_tags_by_note": {},
+        "failed_notes": [],
+        "skipped_due_to_edit": [],
+        "previous_links": list(all_cached_links),
+        "previous_tags": dict(cached_tags),
+        "previous_rendered": previous_rendered,
     }
+
+
+def _wikilink_name(title: str) -> str:
+    """Obsidian wikilinks reference the note name without the .md suffix."""
+    return title[:-3] if title.lower().endswith(".md") else title
+
+
+def link_score(link: dict) -> float:
+    """Score of a link; caches written before scoring existed default to 0."""
+    try:
+        return float(link.get("score") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def rank_and_cap(items, max_links: int = None, key: str = "target"):
+    """Keeps the max_links highest-scoring items, then orders them alphabetically.
+
+    Ranking happens BEFORE the cap so the strongest links survive it; the
+    alphabetical order afterwards is only for stable, readable output. Ties on
+    score are broken alphabetically so the result is deterministic.
+    """
+    if max_links is None:
+        max_links = config.MAX_LINKS_PER_NOTE
+    ranked = sorted(items, key=lambda x: (-link_score(x), str(x.get(key, ""))))
+    if max_links and max_links > 0:
+        ranked = ranked[:max_links]
+    return sorted(ranked, key=lambda x: str(x.get(key, "")))
+
+
+def build_effective_links(links, existing_titles=None, backlinks: bool = None, max_links: int = None):
+    """Returns {source_title: [{"target", "evidence", "score"}, ...]} -- exactly the
+    links that would be rendered into each note.
+
+    Everything that decides what ends up on disk (dedupe, backlinks, score
+    ranking, cap) lives here so link_writer and the cache diff agree on it.
+    When existing_titles is given, links touching a missing note are dropped.
+    """
+    if backlinks is None:
+        backlinks = getattr(config, "BACKLINKS", False)
+    candidates = {}
+
+    def add(src, dst, evidence, score):
+        if not src or not dst or src == dst:
+            return
+        if existing_titles is not None and (src not in existing_titles or dst not in existing_titles):
+            return
+        evidence = (evidence or "").strip().replace("\n", " ")
+        current = candidates.get((src, dst))
+        if current is None:
+            candidates[(src, dst)] = {"target": dst, "evidence": evidence, "score": score}
+            return
+        current["score"] = max(current["score"], score)
+        if not current["evidence"] and evidence:
+            current["evidence"] = evidence
+
+    for link in links:
+        src, dst = link.get("from_note"), link.get("to_note")
+        score = link_score(link)
+        evidence = link.get("evidence", "")
+        add(src, dst, evidence, score)
+        if backlinks:
+            add(dst, src, evidence, score)
+
+    by_source = {}
+    for (src, _dst), item in candidates.items():
+        by_source.setdefault(src, []).append(item)
+    return {src: rank_and_cap(items, max_links) for src, items in by_source.items()}
 
 
 def render_note(
@@ -225,37 +312,39 @@ def render_note(
         content += prefix + "## Tags\n" + " ".join(tags)
         prefix = "\n\n"
     if targets:
-        if max_links is None:
-            max_links = config.MAX_LINKS_PER_NOTE
         if annotate is None:
             annotate = config.ANNOTATE_LINKS
 
-        # Normalize targets into list of (target_title, evidence)
+        # Normalize targets into dicts of (target, evidence, score)
         target_items = []
         for t in targets:
             if isinstance(t, str):
-                target_items.append((t, ""))
+                target_items.append({"target": t, "evidence": "", "score": 0.0})
             elif isinstance(t, dict):
-                target_items.append((t.get("target", ""), t.get("evidence", "")))
+                target_items.append({
+                    "target": t.get("target", ""),
+                    "evidence": t.get("evidence", ""),
+                    "score": link_score(t),
+                })
             elif isinstance(t, (tuple, list)):
-                target_items.append((t[0], t[1] if len(t) > 1 else ""))
+                target_items.append({"target": t[0], "evidence": t[1] if len(t) > 1 else "", "score": 0.0})
 
-        # Deduplicate targets while preserving evidence
+        # Deduplicate targets, keeping the best score and any evidence
         seen_targets = {}
-        for target_title, evidence in target_items:
-            if not target_title:
+        for item in target_items:
+            if not item["target"]:
                 continue
-            clean_evidence = (evidence or "").strip().replace("\n", " ")
-            if target_title not in seen_targets:
-                seen_targets[target_title] = clean_evidence
-            elif not seen_targets[target_title] and clean_evidence:
-                seen_targets[target_title] = clean_evidence
+            item["evidence"] = (item["evidence"] or "").strip().replace("\n", " ")
+            current = seen_targets.get(item["target"])
+            if current is None:
+                seen_targets[item["target"]] = item
+                continue
+            current["score"] = max(current["score"], item["score"])
+            if not current["evidence"] and item["evidence"]:
+                current["evidence"] = item["evidence"]
 
-        # Sort alphabetically by note title
-        sorted_targets = sorted(seen_targets.items(), key=lambda x: x[0])
-
-        if max_links and max_links > 0:
-            sorted_targets = sorted_targets[:max_links]
+        ranked = rank_and_cap(list(seen_targets.values()), max_links)
+        sorted_targets = [(item["target"], item["evidence"]) for item in ranked]
 
         lines = []
         for target_title, evidence in sorted_targets:
@@ -269,98 +358,156 @@ def render_note(
     return (content + "\n") if content else ""
 
 
+def _carry_forward_failed(state: AgentState, titles: set):
+    """Links and tags for notes whose processing failed this run.
+
+    vault_reader dropped them because the note was due for re-processing; if the
+    LLM call then failed we would otherwise strip perfectly good links from disk
+    (and from neighbours' backlinks) over a transient error.
+    """
+    failed = set(state.get("failed_notes") or [])
+    links = list(state.get("links") or [])
+    tags_by_note = dict(state.get("tags_by_note") or {})
+    if not failed:
+        return links, tags_by_note
+    present = {(l.get("from_note"), l.get("to_note")) for l in links}
+    for link in state.get("previous_links") or []:
+        pair = (link.get("from_note"), link.get("to_note"))
+        if pair[0] in failed and pair[1] in titles and pair not in present:
+            links.append(link)
+            present.add(pair)
+    for title in failed:
+        prev = (state.get("previous_tags") or {}).get(title)
+        if prev and title not in tags_by_note:
+            tags_by_note[title] = prev
+    return links, tags_by_note
+
+
+def _write_atomic(file_path: Path, content: str) -> None:
+    """Temp-file swap so a crash mid-write never leaves a half-written note."""
+    temp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+    try:
+        temp_path.write_text(content, encoding="utf-8")
+        temp_path.replace(file_path)
+    except Exception:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
+
+
 def link_writer(state: AgentState):
     log("\n--- [Link Writer] ---")
     dry_run = state.get("dry_run", False)
     if dry_run:
         log("Preview mode: no files will be modified.")
 
-    links = state.get("links", [])
-    note_to_path = {n["title"]: n["path"] for n in state.get("notes", [])}
-    note_to_content = {n["title"]: n["content"] for n in state.get("notes", [])}
+    notes = state.get("notes") or []
+    titles = {n["title"] for n in notes}
+    note_to_path = {n["title"]: n["path"] for n in notes}
+    note_to_content = {n["title"]: n["content"] for n in notes}
+    failed = set(state.get("failed_notes") or [])
 
-    links_by_source = {}
-    for link in links:
-        from_note = link.get("from_note")
-        to_note = link.get("to_note")
-        if from_note and to_note:
-            # Obsidian wikilinks reference the note name without the .md suffix.
-            target_title = to_note[:-3] if to_note.lower().endswith(".md") else to_note
-            evidence = link.get("evidence", "")
-            links_by_source.setdefault(from_note, []).append({"target": target_title, "evidence": evidence})
+    links, tags_by_note = _carry_forward_failed(state, titles)
+    effective = build_effective_links(links, existing_titles=titles)
+    current_rendered = {src: [i["target"] for i in items] for src, items in effective.items()}
+    previous_rendered = state.get("previous_rendered") or {}
 
-    tags_by_note = state.get("tags_by_note", {})
+    # Rewrite every note that was (successfully) re-processed, plus any note
+    # whose rendered link set changed -- that covers notes that gained a link
+    # AND notes that lost one because its target was deleted or renamed.
+    processed = {n["title"] for n in state.get("new_notes") or []} - failed
+    changed = {
+        t for t in titles
+        if set(current_rendered.get(t, [])) != set(previous_rendered.get(t, []))
+    }
+    notes_to_update = (processed | changed) - failed
 
-    # Only rewrite notes that changed this run or that gained a link -- untouched
-    # notes keep whatever is already on disk.
-    new_notes_titles = {note["title"] for note in state.get("new_notes", [])}
-    new_link_sources = {l["from_note"] for l in state.get("new_links", []) if l.get("from_note")}
-    allowed_updates = new_notes_titles | new_link_sources
-
-    notes_to_update = (set(links_by_source) | set(tags_by_note)) & allowed_updates
-
-    written = 0
+    planned = []
     for note_title in sorted(notes_to_update):
         file_path_str = note_to_path.get(note_title)
         original_content = note_to_content.get(note_title)
-
         if not file_path_str or original_content is None:
             continue
 
         note_tags = tags_by_note.get(note_title)
-        raw_targets = links_by_source.get(note_title, [])
-
-        # Deduplicate and cap targets
-        seen = {}
-        for item in raw_targets:
-            t = item["target"]
-            ev = item.get("evidence", "")
-            if t not in seen or (not seen[t] and ev):
-                seen[t] = ev
-        sorted_targets = sorted(seen.items(), key=lambda x: x[0])
-        if config.MAX_LINKS_PER_NOTE > 0:
-            sorted_targets = sorted_targets[:config.MAX_LINKS_PER_NOTE]
-        targets = [{"target": t, "evidence": ev} for t, ev in sorted_targets]
-
+        targets = [
+            {"target": _wikilink_name(i["target"]), "evidence": i["evidence"], "score": i["score"]}
+            for i in effective.get(note_title, [])
+        ]
         new_content = render_note(strip_auto_sections(original_content), note_tags, targets)
-
-        if new_content == original_content:
+        # Trailing-whitespace-only differences are not worth touching a file for.
+        if new_content.rstrip() == original_content.rstrip():
             continue
 
-        updates = []
-        if targets:
-            updates.append(f"{len(targets)} links")
+        updates = [f"{len(targets)} links"] if targets else []
         if note_tags:
             updates.append(f"{len(note_tags)} tags")
-        summary = " and ".join(updates)
+        summary = " and ".join(updates) or "removed stale links"
+        planned.append((note_title, Path(file_path_str), original_content, new_content, summary))
 
+    written = 0
+    skipped_due_to_edit = []
+    write_failed = set()
+    for note_title, file_path, original_content, new_content, summary in planned:
         if dry_run:
             log(f"Would write {summary} to {note_title}")
             written += 1
             continue
 
-        file_path = Path(file_path_str)
-        temp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+        # The pipeline can run for minutes; if the user saved the note in the
+        # meantime, writing our stale copy would silently discard their edit.
         try:
-            temp_path.write_text(new_content, encoding="utf-8")
-            temp_path.replace(file_path)
+            on_disk = file_path.read_text(encoding="utf-8")
+        except Exception as e:
+            log(f"Failed to re-read {note_title} before writing: {e}")
+            write_failed.add(note_title)
+            continue
+        if on_disk != original_content:
+            log(f"Skipped {note_title}: it was edited while Constellation was running. "
+                f"It will be re-processed next run.")
+            skipped_due_to_edit.append(note_title)
+            continue
+
+        try:
+            _write_atomic(file_path, new_content)
             written += 1
             log(f"Wrote {summary} to {note_title}")
         except Exception as e:
-            if temp_path.exists():
-                temp_path.unlink()
+            write_failed.add(note_title)
             log(f"Failed to write to {note_title}: {e}")
 
-    if not notes_to_update:
+    if not planned:
         log("No notes needed updating.")
 
-    return {"notes_written": written}
+    # Record what is actually on disk now: notes we could not write keep their
+    # old link set, so the next run still sees the difference and retries.
+    rendered_out = dict(current_rendered)
+    for title in failed | set(skipped_due_to_edit) | write_failed:
+        if previous_rendered.get(title):
+            rendered_out[title] = list(previous_rendered[title])
+        else:
+            rendered_out.pop(title, None)
+
+    return {
+        "notes_written": written,
+        "links": links,
+        "tags_by_note": tags_by_note,
+        "skipped_due_to_edit": skipped_due_to_edit,
+        "rendered_links": {k: v for k, v in rendered_out.items() if v},
+    }
 
 
 def summary_reporter(state: AgentState):
     log("\n--- [Summary Reporter] ---")
-    links = state.get("links", [])
-    log(f"Done. {len(links)} total links, {len(state.get('new_links', []))} created this run.")
+    links = state.get("links") or []
+    log(f"Done. {len(links)} total links, {len(state.get('new_links') or [])} created this run.")
+
+    failed = list(state.get("failed_notes") or [])
+    skipped = list(state.get("skipped_due_to_edit") or [])
+    if failed:
+        log(f"{len(failed)} note(s) failed and will be retried next run: {', '.join(sorted(failed))}")
+    if skipped:
+        log(f"{len(skipped)} note(s) were edited during the run and will be re-processed next run.")
 
     if state.get("dry_run", False):
         log("Preview mode: cache not written, so the next real run will redo this work.")
@@ -368,11 +515,19 @@ def summary_reporter(state: AgentState):
 
     cache_path = state.get("cache_path")
     if cache_path:
+        # A saved hash marks a note as done. Failed or skipped notes must not get
+        # one, otherwise they would never be retried.
+        not_done = set(failed) | set(skipped)
         cache_data = {
-            "files": {title: {"hash": h} for title, h in state.get("file_hashes", {}).items()},
-            "concepts": state.get("concepts", []),
+            "files": {
+                title: {"hash": h}
+                for title, h in (state.get("file_hashes") or {}).items()
+                if title not in not_done
+            },
+            "concepts": state.get("concepts") or [],
             "links": links,
-            "tags": state.get("tags_by_note", {})
+            "tags": state.get("tags_by_note") or {},
+            "rendered": state.get("rendered_links") or {},
         }
         try:
             with open(cache_path, "w", encoding="utf-8") as f:
@@ -382,3 +537,5 @@ def summary_reporter(state: AgentState):
             log(f"Warning: failed to save cache: {e}")
 
     return {}
+
+

@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Optional
+from typing import Dict, List, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -47,3 +47,20 @@ class AgentState(TypedDict):
     # the cache -- used by the Streamlit "preview only" mode.
     dry_run: bool
     notes_written: int
+    # Notes whose extraction or verification raised. Their hashes are NOT saved,
+    # so a transient API failure is retried on the next run instead of the note
+    # being silently treated as "done".
+    failed_notes: List[str]
+    # Notes the user edited while the pipeline was running. link_writer refuses
+    # to overwrite them (that would lose the edit) and their hash is not saved.
+    skipped_due_to_edit: List[str]
+    # Snapshot of the cache as it was when the run started. link_writer diffs
+    # against it to find notes that lost links (e.g. to a deleted note).
+    previous_links: List[dict]
+    previous_tags: dict
+    # title -> list of target titles actually rendered into the note last time.
+    previous_rendered: dict
+    # Best FAISS similarity per unordered note pair, used to score links.
+    pair_similarity: dict
+    # title -> target titles rendered by this run (persisted as "rendered").
+    rendered_links: dict

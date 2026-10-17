@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from constellation.core import config, vectorstore
@@ -6,27 +7,103 @@ from constellation.core.prompts import prompt_relation, prompt_relation_verify
 from constellation.core.state import AgentState, RelationshipExtractionOutput
 from constellation.core.utils import abatch_invoke_with_retry, minify_concepts
 
+# Each additional verified concept pair between the same two notes adds this
+# much on top of their best similarity: two notes linked by three independent
+# concept relations are a stronger link than two linked by one.
+SUPPORT_BONUS = 0.05
+
+
+def pair_key(note_a: str, note_b: str) -> str:
+    """Order-independent key for a note pair (state dicts must be JSON-friendly)."""
+    a, b = sorted((str(note_a), str(note_b)))
+    return f"{a}\x1f{b}"
+
+
+def distance_to_similarity(distance: float) -> float:
+    """FAISS returns an L2 distance (lower = closer); map it to (0, 1]."""
+    try:
+        return 1.0 / (1.0 + max(float(distance), 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _retrieve_related(store, concepts_by_note: dict, all_concepts: list):
+    """Similarity search for every new concept. Blocking (embeds each query), so
+    the caller runs it in a worker thread.
+
+    Returns (inputs_list, pair_similarity) where pair_similarity holds the best
+    similarity seen between any two notes -- the main ingredient of a link score.
+    """
+    inputs_list = []
+    pair_similarity = {}
+    concept_index = {(c.get("concept_name"), c.get("source_note")): c for c in all_concepts}
+
+    for note_title, note_concepts in concepts_by_note.items():
+        retrieved_concepts = []
+        retrieved_names = set()
+
+        for c in note_concepts:
+            query = f"{c['concept_name']}: {c['explanation']}"
+            try:
+                results = store.similarity_search_with_score(query, k=10)
+            except Exception as e:
+                log(f"  Similarity search failed for '{c['concept_name']}': {str(e)[:160]}")
+                continue
+
+            for doc, distance in results:
+                name = doc.metadata.get("name")
+                note = doc.metadata.get("note")
+
+                # Exclude concepts from the same note.
+                if note == note_title or not note:
+                    continue
+
+                key = pair_key(note_title, note)
+                sim = distance_to_similarity(distance)
+                if sim > pair_similarity.get(key, 0.0):
+                    pair_similarity[key] = sim
+
+                if (name, note) in retrieved_names:
+                    continue
+                retrieved_names.add((name, note))
+
+                match = concept_index.get((name, note))
+                if match:
+                    retrieved_concepts.append(match)
+
+        # Top 10 most similar keeps the prompt compact and within Groq TPM limits.
+        retrieved_concepts = retrieved_concepts[:10]
+
+        if not retrieved_concepts:
+            continue
+
+        inputs_list.append({
+            "new_concepts": json.dumps(minify_concepts(note_concepts)),
+            "existing_concepts": json.dumps(minify_concepts(retrieved_concepts))
+        })
+    return inputs_list, pair_similarity
+
 
 async def relationship_extractor(state: AgentState):
     log("\n--- [Relationship Extractor] ---")
-    new_concepts = state.get("new_concepts", [])
-    all_concepts = state.get("concepts", [])
+    new_concepts = state.get("new_concepts") or []
+    all_concepts = state.get("concepts") or []
 
     # Smart resumption: if nothing new was extracted this run (e.g. we are resuming after
     # an error) but we have cached concepts and no links yet, treat the cache as new.
     if not new_concepts:
-        cached_links = state.get("links", [])
+        cached_links = state.get("links") or []
         if all_concepts and not cached_links:
             log("No new concepts, but cached concepts exist with 0 links. Re-linking all concepts...")
             new_concepts = all_concepts
         else:
             log("No new concepts extracted. Skipping relationship extraction.")
-            return {"raw_links": []}
+            return {"raw_links": [], "pair_similarity": {}}
 
-    store = vectorstore.load_index(state.get("dir", ""), config.embeddings)
+    store = await asyncio.to_thread(vectorstore.load_index, state.get("dir", ""), config.embeddings)
     if store is None:
         log("No FAISS index available -- cannot search for related concepts.")
-        return {"raw_links": []}
+        return {"raw_links": [], "pair_similarity": {}}
 
     try:
         # Group new concepts by source note so we reason note-by-note.
@@ -37,51 +114,9 @@ async def relationship_extractor(state: AgentState):
                 concepts_by_note.setdefault(note, []).append(c)
 
         log(f"Extracting relationships for {len(concepts_by_note)} notes concurrently...")
-
-        inputs_list = []
-        for note_title, note_concepts in concepts_by_note.items():
-            retrieved_concepts = []
-            retrieved_names = set()
-
-            for c in note_concepts:
-                query = f"{c['concept_name']}: {c['explanation']}"
-                try:
-                    results = store.similarity_search(query, k=10)
-                except Exception as e:
-                    log(f"  Similarity search failed for '{c['concept_name']}': {str(e)[:160]}")
-                    continue
-
-                for doc in results:
-                    name = doc.metadata.get("name")
-                    note = doc.metadata.get("note")
-
-                    # Exclude concepts from the same note.
-                    if note == note_title:
-                        continue
-
-                    key = (name, note)
-                    if key in retrieved_names:
-                        continue
-                    retrieved_names.add(key)
-
-                    match = next(
-                        (x for x in all_concepts
-                         if x["concept_name"] == name and x["source_note"] == note),
-                        None
-                    )
-                    if match:
-                        retrieved_concepts.append(match)
-
-            # Top 10 most similar keeps the prompt compact and within Groq TPM limits.
-            retrieved_concepts = retrieved_concepts[:10]
-
-            if not retrieved_concepts:
-                continue
-
-            inputs_list.append({
-                "new_concepts": json.dumps(minify_concepts(note_concepts)),
-                "existing_concepts": json.dumps(minify_concepts(retrieved_concepts))
-            })
+        inputs_list, pair_similarity = await asyncio.to_thread(
+            _retrieve_related, store, concepts_by_note, all_concepts
+        )
 
         all_relations = []
         if inputs_list:
@@ -95,20 +130,86 @@ async def relationship_extractor(state: AgentState):
                     all_relations.extend([link.model_dump() for link in extracted_output.links])
 
         log(f"Total raw cross-note relationships extracted: {len(all_relations)}")
-        return {"raw_links": all_relations}
+        return {"raw_links": all_relations, "pair_similarity": pair_similarity}
     except Exception as e:
         log(f"Failed to extract cross-note relationships: {e}")
-        return {"raw_links": []}
+        return {"raw_links": [], "pair_similarity": {}}
+
+
+def score_links(valid_links: list, supporting_pairs: dict, pair_similarity: dict) -> None:
+    """Sets link["score"] in place: best FAISS similarity between the two notes
+    plus a small bonus per extra supporting concept pair.
+
+    The score is what the per-note link cap ranks by, so the strongest links
+    survive it instead of whichever targets sort first alphabetically.
+    """
+    for link in valid_links:
+        key = pair_key(link["from_note"], link["to_note"])
+        support = max(len(supporting_pairs.get(key, ())), 1)
+        similarity = pair_similarity.get(key, 0.0)
+        link["score"] = round(similarity + SUPPORT_BONUS * (support - 1), 4)
+        link["support"] = support
+
+
+def filter_and_score_links(verified_links: list, state: AgentState) -> tuple:
+    """Structural filtering (no self-links, no duplicates, no links to notes that
+    do not exist) followed by scoring. Returns (valid_links, rejected_count)."""
+    concepts = state.get("concepts") or []
+    note_titles = {note["title"] for note in state.get("notes") or []}
+    title_map = {t.lower(): t for t in note_titles}
+    concept_to_note = {c["concept_name"]: c["source_note"] for c in concepts}
+    existing_pairs = {
+        (l.get("from_note"), l.get("to_note")) for l in state.get("links") or []
+    }
+    valid_links = []
+    seen_pairs = set()
+    supporting_pairs = {}
+    prevented = 0
+
+    for link in verified_links:
+        from_note = link.get("from_note") or concept_to_note.get(link.get("source"))
+        to_note = link.get("to_note") or concept_to_note.get(link.get("target"))
+
+        from_note = _resolve_title(from_note, title_map)
+        to_note = _resolve_title(to_note, title_map)
+
+        if not from_note or not to_note:
+            prevented += 1
+            continue
+        if from_note not in note_titles or to_note not in note_titles:
+            prevented += 1
+            continue
+        if from_note == to_note:
+            prevented += 1
+            continue
+
+        # Every distinct concept pair backing this note pair counts as support,
+        # even when the note pair itself is a duplicate we will not keep.
+        supporting_pairs.setdefault(pair_key(from_note, to_note), set()).add(
+            tuple(sorted((str(link.get("source")), str(link.get("target")))))
+        )
+
+        if (from_note, to_note) in seen_pairs or (from_note, to_note) in existing_pairs:
+            prevented += 1
+            continue
+
+        seen_pairs.add((from_note, to_note))
+        link["from_note"] = from_note
+        link["to_note"] = to_note
+        valid_links.append(link)
+
+    score_links(valid_links, supporting_pairs, state.get("pair_similarity") or {})
+    return valid_links, prevented
 
 
 async def relationship_verifier(state: AgentState):
     log("\n--- [Relationship Verifier] ---")
-    raw_links = state.get("raw_links", [])
-    concepts = state.get("concepts", [])
+    raw_links = state.get("raw_links") or []
+    concepts = state.get("concepts") or []
 
     if not raw_links or not concepts:
         log("No raw links or concepts to verify.")
-        return {"links": state.get("links", []), "new_links": []}
+        return {"links": state.get("links") or [], "new_links": []}
 
     try:
         # Verify in batches of 10 to stay inside Groq's context/token limits (413).
@@ -147,50 +248,16 @@ async def relationship_verifier(state: AgentState):
                 if verified_output.links:
                     all_verified_links.extend([link.model_dump() for link in verified_output.links])
 
-        # --- Structural filtering: no self-links, no links to non-existent notes ---
-        note_titles = {note["title"] for note in state.get("notes", [])}
-        title_map = {t.lower(): t for t in note_titles}
-        concept_to_note = {c["concept_name"]: c["source_note"] for c in concepts}
-        existing_pairs = {
-            (l.get("from_note"), l.get("to_note")) for l in state.get("links", [])
-        }
-        valid_links = []
-        seen_pairs = set()
-        prevented = 0
-
-        for link in all_verified_links:
-            from_note = link.get("from_note") or concept_to_note.get(link.get("source"))
-            to_note = link.get("to_note") or concept_to_note.get(link.get("target"))
-
-            from_note = _resolve_title(from_note, title_map)
-            to_note = _resolve_title(to_note, title_map)
-
-            if not from_note or not to_note:
-                prevented += 1
-                continue
-            if from_note not in note_titles or to_note not in note_titles:
-                prevented += 1
-                continue
-            if from_note == to_note:
-                prevented += 1
-                continue
-            if (from_note, to_note) in seen_pairs or (from_note, to_note) in existing_pairs:
-                prevented += 1
-                continue
-
-            seen_pairs.add((from_note, to_note))
-            link["from_note"] = from_note
-            link["to_note"] = to_note
-            valid_links.append(link)
+        valid_links, prevented = filter_and_score_links(all_verified_links, state)
 
         log(f"Total verified cross-note relationships: {len(valid_links)} (rejected {prevented})")
         return {
-            "links": state.get("links", []) + valid_links,
+            "links": (state.get("links") or []) + valid_links,
             "new_links": valid_links
         }
     except Exception as e:
         log(f"Failed to verify relationships: {e}")
-        return {"links": state.get("links", []), "new_links": []}
+        return {"links": state.get("links") or [], "new_links": []}
 
 
 def _resolve_title(note: str, title_map: dict) -> str:
