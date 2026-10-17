@@ -54,6 +54,9 @@ LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "low").strip()
 # Maximum wikilinks written to each note (0 or negative disables cap).
 MAX_LINKS_PER_NOTE = int(os.getenv("MAX_LINKS_PER_NOTE", "5"))
 
+# How many pre-write snapshots to keep in <vault>/.constellation_backups.
+MAX_BACKUPS = int(os.getenv("MAX_BACKUPS", "10"))
+
 # Whether to append reasoning to wikilinks: "- [[Target]] — reason"
 ANNOTATE_LINKS = os.getenv("ANNOTATE_LINKS", "false").strip().lower() in ("true", "1", "yes")
 

@@ -64,3 +64,5 @@ class AgentState(TypedDict):
     pair_similarity: dict
     # title -> target titles rendered by this run (persisted as "rendered").
     rendered_links: dict
+    # Folder holding the pre-write snapshot of this run, if anything was written.
+    backup_dir: Optional[str]

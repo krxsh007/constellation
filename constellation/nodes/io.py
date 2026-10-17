@@ -4,12 +4,15 @@ import re
 from pathlib import Path
 
 from constellation.core import config
+from constellation.core.backup import create_backup
+from constellation.core.lock import vault_lock
 from constellation.core.log import log
 from constellation.core.state import AgentState
 
 CACHE_FILENAME = ".linker_cache.json"
 # Directories Obsidian / this tool own -- never treat their contents as notes.
-IGNORED_DIRS = {".obsidian", ".trash", ".git", ".linker_faiss_index"}
+IGNORED_DIRS = {".obsidian", ".trash", ".git", ".linker_faiss_index", ".constellation_backups"}
+REPORT_FILENAME = ".linker_report.json"
 
 
 _TAG_LINE = re.compile(r"^#[^\s#]+(?:\s+#[^\s#]+)*$")
@@ -134,6 +137,67 @@ def reset_vault_state(vault_path: str) -> str:
     return ", ".join(removed) if removed else "nothing to reset"
 
 
+def _load_cache(vault: Path) -> dict:
+    cache_path = vault / CACHE_FILENAME
+    if not cache_path.exists():
+        return {}
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        log(f"Warning: could not read cache ({e}).")
+        return {}
+
+
+def strip_vault(vault_path, dry_run: bool = False) -> dict:
+    """Removes everything Constellation ever wrote into the vault's notes.
+
+    Every note loses its generated ``## Tags`` / ``## Related Links`` sections,
+    then the cache and index are deleted so the vault is back to a pre-tool
+    state. Notes are backed up first, so even this is undoable. With dry_run
+    nothing is touched and notes_cleaned is the number that WOULD change.
+    Returns {"notes_cleaned": int, "backup_dir": str | None}.
+    """
+    vault = Path(vault_path).expanduser()
+    if not vault.is_dir():
+        raise ValueError(f"The path '{vault_path}' is not a valid directory.")
+
+    with vault_lock(vault):
+        changes = []
+        for file in iter_notes(vault):
+            try:
+                content = file.read_text(encoding="utf-8")
+            except Exception as e:
+                log(f"Warning: skipping '{file.name}' ({e})")
+                continue
+            cleaned = strip_auto_sections(content)
+            if cleaned.rstrip() == content.rstrip():
+                continue
+            changes.append((file, (cleaned + "\n") if cleaned else ""))
+
+        if dry_run:
+            log(f"Preview: would clean {len(changes)} note(s).")
+            return {"notes_cleaned": len(changes), "backup_dir": None}
+
+        backup_dir = None
+        if changes:
+            backup_dir = str(create_backup(vault, [f for f, _ in changes]))
+            log(f"Backed up {len(changes)} note(s) to {backup_dir}")
+
+        cleaned_count = 0
+        for file, new_content in changes:
+            try:
+                _write_atomic(file, new_content)
+                cleaned_count += 1
+            except Exception as e:
+                log(f"Failed to clean {file.name}: {e}")
+
+        reset_vault_state(str(vault))
+        log(f"Stripped Constellation output from {cleaned_count} note(s); cache and index deleted.")
+        return {"notes_cleaned": cleaned_count, "backup_dir": backup_dir}
+
+
 def vault_reader(state: AgentState):
     directory_path = (state.get("dir") or "").strip().strip("'\"").strip()
     if not directory_path:
@@ -144,18 +208,12 @@ def vault_reader(state: AgentState):
         raise ValueError(f"The path '{directory_path}' is not a valid directory.")
 
     cache_path = directory / CACHE_FILENAME
-    cache = {"files": {}, "concepts": [], "links": [], "tags": {}}
-    if cache_path.exists():
-        try:
-            with open(cache_path, "r", encoding="utf-8") as f:
-                cache = json.load(f)
-        except Exception as e:
-            log(f"Warning: could not read cache ({e}). Treating the vault as new.")
+    cache = _load_cache(directory)
 
-    cached_files = cache.get("files", {})
-    all_cached_concepts = cache.get("concepts", [])
-    all_cached_links = cache.get("links", [])
-    cached_tags = cache.get("tags", {})
+    cached_files = cache.get("files") or {}
+    all_cached_concepts = cache.get("concepts") or []
+    all_cached_links = cache.get("links") or []
+    cached_tags = cache.get("tags") or {}
 
     notes = []
     new_notes = []
@@ -445,9 +503,20 @@ def link_writer(state: AgentState):
         summary = " and ".join(updates) or "removed stale links"
         planned.append((note_title, Path(file_path_str), original_content, new_content, summary))
 
+    backup_dir = None
+    write_failed = set()
+    if planned and not dry_run:
+        # Snapshot exactly the files we are about to touch, before touching any.
+        try:
+            backup_dir = str(create_backup(state.get("dir", ""), [p[1] for p in planned]))
+            log(f"Backed up {len(planned)} note(s) to {backup_dir}")
+        except Exception as e:
+            log(f"Could not create a backup ({e}); not writing any notes.")
+            write_failed = {p[0] for p in planned}
+            planned = []
+
     written = 0
     skipped_due_to_edit = []
-    write_failed = set()
     for note_title, file_path, original_content, new_content, summary in planned:
         if dry_run:
             log(f"Would write {summary} to {note_title}")
@@ -493,6 +562,7 @@ def link_writer(state: AgentState):
         "links": links,
         "tags_by_note": tags_by_note,
         "skipped_due_to_edit": skipped_due_to_edit,
+        "backup_dir": backup_dir,
         "rendered_links": {k: v for k, v in rendered_out.items() if v},
     }
 

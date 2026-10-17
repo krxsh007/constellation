@@ -9,10 +9,12 @@ Run ``streamlit run app.py`` for the UI, or ``python main.py`` for the CLI.
 """
 
 import asyncio
+from pathlib import Path
 
 from langgraph.graph import StateGraph, END
 
 from constellation.core import config, utils
+from constellation.core.lock import VaultLockedError, vault_lock
 from constellation.core.log import log
 from constellation.core.state import AgentState
 from constellation.nodes.concepts import concept_extractor, concept_verifier
@@ -60,6 +62,14 @@ def initial_state(vault_dir: str, dry_run: bool = False) -> dict:
         "tags_by_note": {},
         "dry_run": dry_run,
         "notes_written": 0,
+        "failed_notes": [],
+        "skipped_due_to_edit": [],
+        "previous_links": [],
+        "previous_tags": {},
+        "previous_rendered": {},
+        "pair_similarity": {},
+        "rendered_links": {},
+        "backup_dir": None,
     }
 
 
@@ -69,9 +79,15 @@ async def arun_pipeline(vault_dir: str, dry_run: bool = False) -> dict:
     if missing:
         raise RuntimeError(f"Missing API key(s): {', '.join(missing)}. Add them to .env or the sidebar.")
 
+    vault = Path(utils.clean_path(str(vault_dir or "")) or ".")
+    if not str(vault_dir or "").strip() or not vault.is_dir():
+        raise ValueError(f"The path '{vault_dir}' is not a valid directory.")
+
     utils.reset_key_rotation()
     log(config.describe_config())
-    return await app.ainvoke(initial_state(vault_dir, dry_run))
+    # Raises VaultLockedError if another run is already working on this vault.
+    with vault_lock(vault):
+        return await app.ainvoke(initial_state(vault_dir, dry_run))
 
 
 def run_pipeline(vault_dir: str, dry_run: bool = False) -> dict:
