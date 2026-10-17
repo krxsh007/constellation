@@ -8,7 +8,6 @@ embedding back-ends -- nothing touches the network.
 Run with:  python3 -m unittest discover tests
 """
 
-import asyncio
 import io as stdio
 import json
 import sys
@@ -24,9 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from langchain_core.messages import AIMessage
 
 import main
-from constellation.core import config, usage, utils
+from constellation.core import config, prompts, usage, utils
 from constellation.core import log as logmod
-from constellation.core import prompts
 from constellation.core.state import (
     ConceptExtractionOutput,
     ConceptModel,

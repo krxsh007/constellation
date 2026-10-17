@@ -797,6 +797,7 @@ def _iso_now() -> str:
 def build_run_report(state: AgentState) -> dict:
     """A machine-readable summary of the run (also shown in the CLI / UI)."""
     from datetime import datetime
+
     from constellation.core import usage
 
     started_at = state.get("started_at") or _iso_now()

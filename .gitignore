@@ -33,6 +33,11 @@ Thumbs.db
 # Local vector index (rebuilt from the vault)
 .linker_faiss_index/
 
+# Packaging
+*.egg-info/
+build/
+dist/
+
 # Internal planning and AI config
 .planning/
 .claude/

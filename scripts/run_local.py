@@ -4,7 +4,6 @@
     python run_local.py "C:/path/vault"
 """
 
-import os
 import sys
 from pathlib import Path
 
