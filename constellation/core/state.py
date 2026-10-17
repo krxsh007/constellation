@@ -1,4 +1,4 @@
-from typing import TypedDict, List, Optional
+from typing import Dict, List, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -47,3 +47,36 @@ class AgentState(TypedDict):
     # the cache -- used by the Streamlit "preview only" mode.
     dry_run: bool
     notes_written: int
+    # Notes whose extraction or verification raised. Their hashes are NOT saved,
+    # so a transient API failure is retried on the next run instead of the note
+    # being silently treated as "done".
+    failed_notes: List[str]
+    # Notes the user edited while the pipeline was running. link_writer refuses
+    # to overwrite them (that would lose the edit) and their hash is not saved.
+    skipped_due_to_edit: List[str]
+    # Snapshot of the cache as it was when the run started. link_writer diffs
+    # against it to find notes that lost links (e.g. to a deleted note).
+    previous_links: List[dict]
+    previous_tags: dict
+    # title -> list of target titles actually rendered into the note last time.
+    previous_rendered: dict
+    # Best FAISS similarity per unordered note pair, used to score links.
+    pair_similarity: dict
+    # title -> target titles rendered by this run (persisted as "rendered").
+    rendered_links: dict
+    # Folder holding the pre-write snapshot of this run, if anything was written.
+    backup_dir: Optional[str]
+    # Frontmatter tags Constellation added per note: last run's (from the cache)
+    # and this run's. Only these are ever removed -- never the user's own tags.
+    previous_fm_tags: dict
+    fm_tags_by_note: dict
+    # Rendering settings of the last run; a change forces a redraw.
+    previous_settings: dict
+    # Notes checkpointed (extracted) by an interrupted run that still need links.
+    resumed_notes: List[str]
+    # Dry runs only: {title: {"before": str, "after": str}}.
+    preview: Dict[str, dict]
+    # Absolute path -> hash of the content we wrote (watch mode ignores these).
+    written_hashes: dict
+    started_at: str
+    run_report: dict

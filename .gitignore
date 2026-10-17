@@ -36,3 +36,8 @@ Thumbs.db
 # Internal planning and AI config
 .planning/
 .claude/
+
+# Constellation run artifacts (when a vault lives inside the repo)
+.linker_report.json
+.linker.lock
+.constellation_backups/
