@@ -3,8 +3,12 @@
 Run with:  streamlit run app.py
 """
 
-import shutil
+import csv
+import io
+import json
+import time
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
@@ -13,35 +17,24 @@ st.set_page_config(page_title="Constellation", page_icon="🌌", layout="wide")
 
 from constellation.core import config, log as logmod, vectorstore
 from constellation.core.utils import clean_path
-from main import run_pipeline
 from constellation.nodes.io import CACHE_FILENAME, count_notes, reset_vault_state
-
-VAULT_KEY = "vault_path"
-
-
-# --------------------------------------------------------------------------- #
-# Helpers
-# --------------------------------------------------------------------------- #
-def is_vault(path: str) -> bool:
-    cleaned = clean_path(path)
-    return bool(cleaned) and Path(cleaned).is_dir()
+from constellation.ui import helpers
 
 
-def vault_stats(path: str) -> dict:
-    vault = Path(clean_path(path))
-    cache = vault / CACHE_FILENAME
-    processed = 0
-    if cache.exists():
-        try:
-            import json
-            processed = len(json.loads(cache.read_text(encoding="utf-8")).get("files", {}))
-        except Exception:
-            processed = 0
-    return {
-        "notes": count_notes(vault),
-        "processed": processed,
-        "indexed": vectorstore.index_exists(str(vault)),
+def init_state() -> None:
+    """Seeds session_state once so the vault path and options survive reruns."""
+    defaults = {
+        "vault_path": "",
+        "opt_dry_run": True,
+        "opt_force": False,
+        "opt_max_links": max(1, min(20, config.MAX_LINKS_PER_NOTE or 5)),
+        "opt_annotate": config.ANNOTATE_LINKS,
+        "opt_excluded": ", ".join(config.EXCLUDED_DIRS),
+        "opt_backlinks": bool(getattr(config, "BACKLINKS", False)),
+        "opt_tags_fm": bool(getattr(config, "TAGS_IN_FRONTMATTER", False)),
     }
+    for k, v in defaults.items():
+        st.session_state.setdefault(k, v)
 
 
 def parse_keys(text: str):
@@ -49,221 +42,433 @@ def parse_keys(text: str):
     return [k.strip() for chunk in text.splitlines() for k in chunk.split(",") if k.strip()]
 
 
-# --------------------------------------------------------------------------- #
-# Sidebar -- credentials and models
-# --------------------------------------------------------------------------- #
-with st.sidebar:
-    st.header("Settings")
+def vault_dir() -> str:
+    return clean_path(st.session_state.get("vault_path", ""))
 
-    env_groq = len(config.GROQ_API_KEYS)
-    env_google = len(config.GOOGLE_API_KEYS)
-    if env_groq and env_google:
-        st.success(f"Loaded {env_groq} Groq and {env_google} Google key(s) from `.env`")
+
+# --------------------------------------------------------------------------- #
+# Sidebar
+# --------------------------------------------------------------------------- #
+def _pill(name: str, n: int, needed: bool) -> str:
+    if not needed:
+        color, text = "#888", f"{name}: not needed"
+    elif n:
+        color, text = "#1a9d5b", f"{name}: {n} key(s) loaded"
     else:
-        st.warning("Some API keys are missing from `.env` — add them below.")
-
-    with st.expander("API keys", expanded=not (env_groq and env_google)):
-        st.caption("One key per line. Extra keys are rotated automatically on rate limits.")
-        groq_input = st.text_area("Groq keys (extraction & verification)", height=80, key="groq_keys")
-        google_input = st.text_area("Google keys (embeddings)", height=80, key="google_keys")
-
-    with st.expander("Models"):
-        extraction_model = st.text_input("Extraction", value=config.LLM_EXTRACTION)
-        verification_model = st.text_input("Verification", value=config.LLM_VERIFICATION)
-        relationship_model = st.text_input("Relationship", value=config.LLM_RELATIONSHIP)
-
-    st.caption(f"Embeddings: `{config.EMBEDDING_MODEL}`")
+        color, text = "#d6453d", f"{name}: missing"
+    return (f'<span style="background:{color};color:white;padding:2px 10px;'
+            f'border-radius:999px;font-size:0.8rem">{text}</span>')
 
 
-# Apply sidebar overrides on top of whatever .env provided.
-if parse_keys(groq_input):
-    config.set_groq_keys(parse_keys(groq_input) + config.GROQ_API_KEYS)
-if parse_keys(google_input):
-    config.set_google_keys(parse_keys(google_input) + config.GOOGLE_API_KEYS)
-config.set_models(extraction_model, verification_model, relationship_model)
+def render_sidebar() -> None:
+    providers_ok = hasattr(config, "set_providers")
+    with st.sidebar:
+        st.header("🌌 Constellation")
+
+        llm_provider = getattr(config, "LLM_PROVIDER", "groq")
+        emb_provider = getattr(config, "EMBEDDING_PROVIDER", "google")
+        with st.expander("Providers"):
+            if providers_ok:
+                llms, embs = ["groq", "ollama"], ["google", "ollama"]
+                llm_provider = st.selectbox(
+                    "LLM provider", llms, index=llms.index(llm_provider) if llm_provider in llms else 0)
+                emb_provider = st.selectbox(
+                    "Embedding provider", embs, index=embs.index(emb_provider) if emb_provider in embs else 0)
+                if "ollama" in (llm_provider, emb_provider):
+                    st.caption(f"Ollama at `{getattr(config, 'OLLAMA_BASE_URL', 'http://localhost:11434')}`")
+            else:
+                st.caption("Provider selection: unavailable in this build.")
+
+        with st.expander("API keys"):
+            st.caption("Separate several keys with commas; extras rotate on rate limits.")
+            groq_input = st.text_input("Groq keys", type="password", key="groq_keys")
+            google_input = st.text_input("Google keys", type="password", key="google_keys")
+
+        with st.expander("Models"):
+            ext = st.text_input("Extraction", value=config.LLM_EXTRACTION)
+            ver = st.text_input("Verification", value=config.LLM_VERIFICATION)
+            rel = st.text_input("Relationship", value=config.LLM_RELATIONSHIP)
+            st.caption(f"Embeddings: `{config.EMBEDDING_MODEL}`")
+
+    if parse_keys(groq_input):
+        config.set_groq_keys(parse_keys(groq_input) + config.GROQ_API_KEYS)
+    if parse_keys(google_input):
+        config.set_google_keys(parse_keys(google_input) + config.GOOGLE_API_KEYS)
+    config.set_models(ext, ver, rel)
+    if providers_ok:
+        config.set_providers(llm=llm_provider, embeddings=emb_provider)
+
+    with st.sidebar:
+        st.markdown(_pill("Groq", len(config.GROQ_API_KEYS), llm_provider == "groq"), unsafe_allow_html=True)
+        st.markdown(_pill("Google", len(config.GOOGLE_API_KEYS), emb_provider == "google"),
+                    unsafe_allow_html=True)
+
+
+def missing_keys_for_run() -> list:
+    """Missing keys, taking the selected providers into account."""
+    missing = list(config.missing_keys())
+    if getattr(config, "LLM_PROVIDER", "groq") == "ollama" and "Groq" in missing:
+        missing.remove("Groq")
+    if getattr(config, "EMBEDDING_PROVIDER", "google") == "ollama" and "Google" in missing:
+        missing.remove("Google")
+    return missing
 
 
 # --------------------------------------------------------------------------- #
-# Main -- vault selection
+# Run tab
 # --------------------------------------------------------------------------- #
-st.title("🌌 Constellation")
-st.caption(
-    "Reads every note in your vault, extracts concepts with an LLM, then writes "
-    "Obsidian tags and `[[wikilinks]]` back into the files so the graph view connects up."
-)
+def vault_info(path: str) -> dict:
+    vault = Path(path)
+    cache = vault / CACHE_FILENAME
+    last_run = None
+    if cache.exists():
+        last_run = datetime.fromtimestamp(cache.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    return {
+        "has_obsidian": (vault / ".obsidian").is_dir(),
+        "notes": count_notes(vault),
+        "excluded": helpers.count_excluded_dirs(str(vault), config.EXCLUDED_DIRS),
+        "cache": cache.exists(),
+        "index": vectorstore.index_exists(str(vault)),
+        "last_run": last_run,
+    }
 
-vault_path = st.text_input(
-    "Obsidian vault folder",
-    value=st.session_state.get(VAULT_KEY, ""),
-    placeholder=r"C:\Users\you\Documents\MyVault",
-    help="The absolute path to the folder your notes live in.",
-)
-st.session_state[VAULT_KEY] = vault_path
 
-valid = is_vault(vault_path)
-if vault_path and not valid:
-    st.error("That folder does not exist. Paste the full path to your vault.")
-
-if valid:
-    stats = vault_stats(vault_path)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Markdown notes", stats["notes"])
-    c2.metric("Already processed", stats["processed"])
-    c3.metric("Concept index", "built" if stats["indexed"] else "not built")
-
-    if stats["notes"] == 0:
-        st.warning("No `.md` files found in that folder.")
-
-    with st.expander("Options"):
-        dry_run = st.checkbox(
-            "Preview only (don't modify my notes)",
-            value=False,
-            help="Runs the whole pipeline and shows what it would write, leaving files untouched.",
-        )
-        force = st.checkbox(
-            "Re-process every note (clears the cache and concept index)",
-            value=False,
-            help="By default only new or edited notes cost API calls.",
-        )
-        max_links = st.slider(
-            "Max links per note",
-            min_value=1,
-            max_value=20,
-            value=config.MAX_LINKS_PER_NOTE,
-            help="Maximum number of wikilinks to write to any single note.",
-        )
-        annotate_links = st.checkbox(
-            "Annotate links with reasoning",
-            value=config.ANNOTATE_LINKS,
-            help="Appends a concise explanation after each wikilink: - [[Target]] — reason",
-        )
-        excluded_dirs_val = st.text_input(
-            "Excluded folders",
-            value=", ".join(config.EXCLUDED_DIRS),
-            help="Comma-separated list of vault folder names to ignore (e.g. Templates, Archive, Daily Notes).",
-        )
-
-    config.set_max_links(max_links)
-    config.set_annotate_links(annotate_links)
-    config.set_excluded_dirs(excluded_dirs_val)
-
-    st.info(
-        "Constellation appends a `## Tags` and `## Related Links` section to your notes. "
-        "It only rewrites those two sections, but a backup of your vault is still a good idea "
-        "before the first run.",
-        icon="⚠️",
+def render_vault_panel() -> bool:
+    """Path input + validation. Returns True when the vault can be run."""
+    st.text_input(
+        "Obsidian vault folder",
+        key="vault_path",
+        placeholder="/Users/you/Documents/MyVault",
+        help="Absolute path to the folder your notes live in.",
     )
+    path = vault_dir()
+    if not path:
+        st.info("Enter the path to your vault to get started.")
+        return False
+    if not Path(path).is_dir():
+        st.error("That path is not a directory. Paste the full path to your vault.")
+        return False
+    info = vault_info(path)
+    if not info["has_obsidian"]:
+        st.warning("No `.obsidian` folder found — this may not be an Obsidian vault.")
+    if info["notes"] == 0:
+        st.warning("No `.md` notes found in that folder.")
+    cols = st.columns(5)
+    cols[0].metric("Notes", info["notes"])
+    cols[1].metric("Excluded folders", info["excluded"])
+    cols[2].metric("Cache", "present" if info["cache"] else "none")
+    cols[3].metric("Concept index", "built" if info["index"] else "not built")
+    cols[4].metric("Last run", info["last_run"] or "never")
+    return info["notes"] > 0
 
-    run = st.button("Run linker", type="primary", disabled=stats["notes"] == 0)
 
-    # ----------------------------------------------------------------------- #
-    # Run
-    # ----------------------------------------------------------------------- #
-    if run:
-        if config.missing_keys():
-            st.error(f"Missing API key(s): {', '.join(config.missing_keys())}. Add them in the sidebar.")
-            st.stop()
+def render_options() -> None:
+    with st.container(border=True):
+        st.subheader("Options")
+        left, right = st.columns(2)
+        with left:
+            st.markdown("**Safety**")
+            st.checkbox("Preview only (dry run — don't modify notes)", key="opt_dry_run")
+            st.checkbox("Force: clear cache and concept index first", key="opt_force")
+            st.markdown("**Linking**")
+            st.slider("Max links per note", 1, 20, key="opt_max_links")
+            st.checkbox("Annotate links with reasoning", key="opt_annotate")
+        with right:
+            st.markdown("**Output**")
+            bl = hasattr(config, "set_backlinks")
+            st.checkbox("Write backlinks" + ("" if bl else " (unavailable)"), key="opt_backlinks", disabled=not bl)
+            fm = hasattr(config, "set_tags_in_frontmatter")
+            st.checkbox("Tags in frontmatter" + ("" if fm else " (unavailable)"), key="opt_tags_fm", disabled=not fm)
+            st.markdown("**Scope**")
+            st.text_input("Excluded folders (comma-separated)", key="opt_excluded",
+                          help="e.g. Templates, Archive, Daily Notes")
 
-        if force:
-            st.toast(f"Reset: {reset_vault_state(vault_path)}")
 
-        st.subheader("Progress")
-        log_area = st.container(height=380)
-        placeholder = log_area.empty()
-        lines = []
+def apply_options() -> None:
+    s = st.session_state
+    config.set_max_links(s["opt_max_links"])
+    config.set_annotate_links(s["opt_annotate"])
+    config.set_excluded_dirs(s["opt_excluded"])
+    if hasattr(config, "set_backlinks"):
+        config.set_backlinks(bool(s["opt_backlinks"]))
+    if hasattr(config, "set_tags_in_frontmatter"):
+        config.set_tags_in_frontmatter(bool(s["opt_tags_fm"]))
+
+
+def show_error(e: Exception) -> None:
+    try:
+        from constellation.core.lock import VaultLockedError
+    except ImportError:
+        VaultLockedError = None
+    if VaultLockedError is not None and isinstance(e, VaultLockedError):
+        st.error("Another run is in progress on this vault. Wait for it to finish and try again.")
+    else:
+        st.error(f"Something went wrong: {e}")
+    with st.expander("Traceback"):
+        st.code("".join(traceback.format_exception(e)), language="text")
+
+
+def execute_run(path: str) -> None:
+    """Runs the pipeline with live stage tracking and stores the result."""
+    from main import run_pipeline
+
+    missing = missing_keys_for_run()
+    if missing:
+        st.error(f"Missing API key(s): {', '.join(missing)}. Add them in the sidebar or `.env`.")
+        return
+
+    apply_options()
+    dry_run = st.session_state["opt_dry_run"]
+    lines: list = []
+    current = {"stage": None}
+    started = time.time()
+
+    with st.status("Starting…", expanded=True) as status:
+        tracker = st.empty()
+        tracker.markdown(helpers.stage_markdown(None))
+        with st.expander("Raw log"):
+            log_box = st.empty()
 
         def sink(message: str):
             lines.append(message)
-            placeholder.code("\n".join(lines[-500:]), language="text")
+            stage = helpers.detect_stage(message)
+            if stage:
+                current["stage"] = stage
+                status.update(label=f"Running: {stage}…")
+                tracker.markdown(helpers.stage_markdown(stage))
+            log_box.code("\n".join(lines[-400:]), language="text")
 
         logmod.set_sink(sink)
         try:
-            with st.spinner("Running the pipeline — this can take a few minutes on a large vault..."):
-                result = run_pipeline(clean_path(vault_path), dry_run=dry_run)
-            st.session_state["result"] = result
-            st.session_state["result_dry_run"] = dry_run
-            st.session_state["log"] = list(lines)
+            if st.session_state["opt_force"]:
+                st.toast(f"Reset: {reset_vault_state(path)}")
+            result = run_pipeline(path, dry_run=dry_run)
+            st.session_state.update(
+                result=result, result_dry_run=dry_run,
+                result_duration=time.time() - started, log=list(lines))
+            tracker.markdown(helpers.stage_markdown(current["stage"], finished=True))
+            status.update(label="Finished", state="complete", expanded=False)
         except Exception as e:
-            st.session_state.pop("result", None)
-            st.error(f"Pipeline failed: {e}")
-            st.code(traceback.format_exc(), language="text")
+            st.session_state["log"] = list(lines)
+            tracker.markdown(helpers.stage_markdown(current["stage"], failed=True))
+            status.update(label="Failed", state="error")
+            show_error(e)
+            return
         finally:
             logmod.clear_sink()
+    st.success("Done — see the Results, Graph and History tabs.")
 
-    # ----------------------------------------------------------------------- #
-    # Results
-    # ----------------------------------------------------------------------- #
+
+def render_run_tab() -> None:
+    can_run = render_vault_panel()
+    if not Path(vault_dir() or "/nonexistent").is_dir():
+        return
+    render_options()
+    st.info("Constellation only rewrites its own `## Tags` / `## Related Links` sections. "
+            "Try Preview first; backups are listed under History & Undo.", icon="⚠️")
+    if st.button("🚀 Run Constellation", type="primary", disabled=not can_run, width="stretch"):
+        execute_run(vault_dir())
+    elif st.session_state.get("log"):
+        with st.expander("Last run log"):
+            st.code("\n".join(st.session_state["log"][-500:]), language="text")
+
+
+# --------------------------------------------------------------------------- #
+# Results tab
+# --------------------------------------------------------------------------- #
+def to_csv(rows: list) -> str:
+    if not rows:
+        return ""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue()
+
+
+def table_with_downloads(rows: list, name: str) -> None:
+    if not rows:
+        st.write(f"No {name} yet.")
+        return
+    query = st.text_input("Search", key=f"search_{name}", placeholder="filter rows…")
+    shown = helpers.filter_rows(rows, query)
+    st.caption(f"{len(shown)} of {len(rows)} rows")
+    st.dataframe(shown, width="stretch", hide_index=True)
+    c1, c2, _ = st.columns([1, 1, 4])
+    c1.download_button("⬇ CSV", to_csv(shown), f"{name}.csv", "text/csv", key=f"{name}_csv")
+    c2.download_button("⬇ JSON", json.dumps(shown, indent=2, default=str), f"{name}.json",
+                       "application/json", key=f"{name}_json")
+
+
+def render_metrics(result: dict) -> None:
+    rep = result.get("run_report") or {}
+    failed = rep.get("notes_failed", result.get("failed_notes")) or []
+    tokens = (rep.get("input_tokens") or 0) + (rep.get("output_tokens") or 0)
+    duration = rep.get("duration_s", st.session_state.get("result_duration"))
+    tags_total = sum(len(t) for t in result.get("tags_by_note", {}).values())
+    cards = [
+        ("Notes scanned", rep.get("notes_total", len(result.get("notes", [])))),
+        ("Processed", rep.get("notes_processed", len(result.get("new_notes", [])))),
+        ("Written", rep.get("notes_written", result.get("notes_written", 0))),
+        ("New links", rep.get("links_new", len(result.get("new_links", [])))),
+        ("Tags", tags_total),
+        ("Failed notes", len(failed)),
+        ("Tokens used", f"{tokens:,}" if tokens else "n/a"),
+        ("Duration", f"{duration:.1f}s" if duration else "n/a"),
+    ]
+    for row in (cards[:4], cards[4:]):
+        for col, (label, val) in zip(st.columns(4), row):
+            col.metric(label, val)
+
+
+def render_previews(preview: dict) -> None:
+    names = sorted(preview)
+    changed = [n for n in names if preview[n].get("before") != preview[n].get("after")]
+    st.caption(f"{len(changed)} of {len(names)} notes would change")
+    pick = st.selectbox("Note", changed or names, key="preview_pick")
+    entry = preview.get(pick) or {}
+    diff = helpers.note_diff(entry.get("before", ""), entry.get("after", ""), pick)
+    st.code(diff or "(no changes)", language="diff")
+
+
+def render_results_tab() -> None:
     result = st.session_state.get("result")
-    if result:
-        was_dry_run = st.session_state.get("result_dry_run", False)
-        st.subheader("Results")
-        if was_dry_run:
-            st.info("Preview run — no files were modified.")
+    if not result:
+        st.info("No results yet. Run the pipeline from the Run tab.")
+        return
+    if st.session_state.get("result_dry_run"):
+        st.info("Preview run — no files were modified.")
+    else:
+        st.success(f"Updated {result.get('notes_written', 0)} note(s).")
+    render_metrics(result)
+
+    rep = result.get("run_report") or {}
+    failed = rep.get("notes_failed") or result.get("failed_notes") or []
+    if failed:
+        with st.expander(f"⚠️ {len(failed)} failed note(s)"):
+            st.write(failed)
+    skipped = rep.get("skipped_due_to_edit") or []
+    if skipped:
+        with st.expander(f"{len(skipped)} note(s) skipped because they were edited during the run"):
+            st.write(skipped)
+
+    t_links, t_tags, t_concepts, t_diffs, t_log = st.tabs(["Links", "Tags", "Concepts", "Diffs", "Log"])
+    with t_links:
+        table_with_downloads(helpers.link_rows(result.get("links", [])), "links")
+    with t_tags:
+        table_with_downloads(
+            [{"Note": n, "Tags": " ".join(t)} for n, t in sorted(result.get("tags_by_note", {}).items())], "tags")
+    with t_concepts:
+        table_with_downloads(
+            [{"Note": c.get("source_note"), "Concept": c.get("concept_name"), "Category": c.get("category"),
+              "Importance": c.get("importance_score"), "Explanation": c.get("explanation")}
+             for c in result.get("concepts", [])], "concepts")
+    with t_diffs:
+        if result.get("preview"):
+            render_previews(result["preview"])
         else:
-            st.success(f"Updated {result.get('notes_written', 0)} note(s) in your vault.")
+            st.write("Per-note diffs appear here after a preview run, when the pipeline provides them.")
+    with t_log:
+        st.code("\n".join(st.session_state.get("log", [])), language="text")
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Notes scanned", len(result.get("notes", [])))
-        m2.metric("Notes processed", len(result.get("new_notes", [])))
-        m3.metric("Concepts", len(result.get("concepts", [])))
-        m4.metric("Links (new / total)",
-                  f"{len(result.get('new_links', []))} / {len(result.get('links', []))}")
 
-        tab_links, tab_tags, tab_concepts, tab_log = st.tabs(
-            ["Links", "Tags", "Concepts", "Log"]
-        )
+# --------------------------------------------------------------------------- #
+# Graph tab
+# --------------------------------------------------------------------------- #
+def render_graph_tab() -> None:
+    result = st.session_state.get("result")
+    links = (result or {}).get("links", [])
+    if not links:
+        st.info("No links to draw yet. Run the pipeline first.")
+        return
+    c1, c2 = st.columns([2, 1])
+    query = c1.text_input("Search note", key="graph_q", placeholder="show a note and its neighbours")
+    top_n = c2.slider("Most-connected notes", 5, 200, 40, key="graph_n")
+    dot, n_nodes, n_edges = helpers.graph_dot(links, query, top_n)
+    st.caption(f"Showing {n_nodes} notes and {n_edges} links")
+    if n_nodes == 0:
+        st.warning("Nothing matches that search.")
+        return
+    st.graphviz_chart(dot, width="stretch")
 
-        with tab_links:
-            links = result.get("links", [])
-            if links:
-                st.dataframe(
-                    [
-                        {
-                            "From note": l.get("from_note"),
-                            "Wikilink": f"[[{str(l.get('to_note', '')).removesuffix('.md')}]]",
-                            "Relationship": l.get("relationship"),
-                            "Why": l.get("evidence"),
-                        }
-                        for l in links
-                    ],
-                    width="stretch",
-                    hide_index=True,
-                )
-            else:
-                st.write("No links yet. Notes need at least a couple of related topics to connect.")
 
-        with tab_tags:
-            tags_by_note = result.get("tags_by_note", {})
-            if tags_by_note:
-                st.dataframe(
-                    [{"Note": note, "Tags": " ".join(tags)} for note, tags in sorted(tags_by_note.items())],
-                    width="stretch",
-                    hide_index=True,
-                )
-            else:
-                st.write("No tags generated.")
+# --------------------------------------------------------------------------- #
+# History & Undo tab
+# --------------------------------------------------------------------------- #
+def render_backups(path: str) -> None:
+    st.subheader("Backups")
+    try:
+        from constellation.core.backup import list_backups, restore_backup
+    except ImportError:
+        st.warning("Backups: unavailable in this build.")
+        return
+    try:
+        backups = list_backups(path)
+    except Exception as e:
+        show_error(e)
+        return
+    if not backups:
+        st.write("No backups yet. One is created before notes are modified.")
+    for b in backups:
+        c1, c2, c3, c4 = st.columns([3, 3, 2, 2])
+        c1.write(f"**{b.get('name')}**")
+        c2.write(str(b.get("created")))
+        c3.write(f"{b.get('file_count', '?')} files")
+        if c4.button("Restore", key=f"restore_{b.get('name')}"):
+            try:
+                st.success(f"Restored {restore_backup(path, b['name'])} file(s) from {b['name']}.")
+            except Exception as e:
+                show_error(e)
 
-        with tab_concepts:
-            concepts = result.get("concepts", [])
-            if concepts:
-                st.dataframe(
-                    [
-                        {
-                            "Note": c.get("source_note"),
-                            "Concept": c.get("concept_name"),
-                            "Category": c.get("category"),
-                            "Importance": c.get("importance_score"),
-                            "Explanation": c.get("explanation"),
-                        }
-                        for c in concepts
-                    ],
-                    width="stretch",
-                    hide_index=True,
-                )
-            else:
-                st.write("No concepts extracted.")
 
-        with tab_log:
-            st.code("\n".join(st.session_state.get("log", [])), language="text")
-else:
-    st.stop()
+def render_strip(path: str) -> None:
+    st.subheader("Remove everything Constellation wrote")
+    st.caption("Strips the `## Tags` / `## Related Links` sections Constellation added to your notes.")
+    confirm = st.checkbox("I understand this edits my notes", key="confirm_strip")
+    if not st.button("Strip Constellation output", disabled=not confirm):
+        return
+    try:
+        from constellation.nodes.io import strip_vault
+    except ImportError:
+        st.warning("Strip: unavailable in this build.")
+        return
+    try:
+        res = strip_vault(path, dry_run=False)
+        msg = f"Cleaned {res.get('notes_cleaned', 0)} note(s)."
+        if res.get("backup_dir"):
+            msg += f" Backup: `{res['backup_dir']}`"
+        st.success(msg)
+    except Exception as e:
+        show_error(e)
+
+
+def render_history_tab() -> None:
+    path = vault_dir()
+    if not path or not Path(path).is_dir():
+        st.info("Set a valid vault path in the Run tab.")
+        return
+    render_backups(path)
+    st.divider()
+    render_strip(path)
+
+
+# --------------------------------------------------------------------------- #
+# Main
+# --------------------------------------------------------------------------- #
+def main() -> None:
+    init_state()
+    render_sidebar()
+    st.title("🌌 Constellation")
+    st.caption("Links your Obsidian notes with LLM-extracted concepts, tags and `[[wikilinks]]`.")
+    t_run, t_results, t_graph, t_hist = st.tabs(["Run", "Results", "Graph", "History & Undo"])
+    with t_run:
+        render_run_tab()
+    with t_results:
+        render_results_tab()
+    with t_graph:
+        render_graph_tab()
+    with t_hist:
+        render_history_tab()
+
+
+main()
