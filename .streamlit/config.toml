@@ -1,6 +1,24 @@
 [theme]
-primaryColor = "#7c5cff"
-font = "sans serif"
+base = "dark"
+primaryColor = "#8b7cff"
+backgroundColor = "#0a0d1a"
+secondaryBackgroundColor = "#121729"
+textColor = "#e6e8f2"
+linkColor = "#5ee6ff"
+borderColor = "#232a44"
+codeBackgroundColor = "#070a15"
+dataframeHeaderBackgroundColor = "#121729"
+font = "Inter, sans-serif"
+codeFont = "'JetBrains Mono', monospace"
+baseRadius = "10px"
+showWidgetBorder = true
+
+[theme.sidebar]
+backgroundColor = "#0d1122"
+secondaryBackgroundColor = "#151b31"
+
+[client]
+toolbarMode = "minimal"
 
 [browser]
 gatherUsageStats = false

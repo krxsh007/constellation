@@ -35,6 +35,9 @@ py-modules = ["main", "app"]
 [tool.setuptools.packages.find]
 include = ["constellation*"]
 
+[tool.setuptools.package-data]
+"constellation.ui" = ["*.css", "*.html"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"

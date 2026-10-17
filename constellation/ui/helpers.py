@@ -4,6 +4,7 @@ import difflib
 import os
 import re
 from collections import Counter
+from datetime import datetime
 from typing import Iterable, List, Optional, Tuple
 
 STAGES = [
@@ -28,20 +29,18 @@ def detect_stage(message: str) -> Optional[str]:
     return name if name in STAGES else None
 
 
-def stage_markdown(current: Optional[str], finished: bool = False, failed: bool = False) -> str:
-    """Renders the 7-stage tracker as markdown (pending / running / done)."""
+def stage_states(current: Optional[str], finished: bool = False, failed: bool = False) -> List[str]:
+    """Per-stage state for the tracker: 'pending', 'running', 'done' or 'failed'."""
     idx = STAGES.index(current) if current in STAGES else -1
-    rows = []
-    for i, name in enumerate(STAGES):
-        if finished or i < idx:
-            icon = "✅"
+    states = []
+    for i in range(len(STAGES)):
+        if (finished and not failed) or i < idx:
+            states.append("done")
         elif i == idx:
-            icon = "❌" if failed else "⏳"
+            states.append("failed" if failed else "running")
         else:
-            icon = "⚪"
-        label = f"**{name}**" if i == idx and not finished else name
-        rows.append(f"{icon} {label}")
-    return "  \n".join(rows)
+            states.append("pending")
+    return states
 
 
 def count_excluded_dirs(vault: str, excluded: Iterable[str]) -> int:
@@ -97,38 +96,76 @@ def filter_rows(rows: List[dict], query: str) -> List[dict]:
     return [r for r in rows if any(q in str(v).lower() for v in r.values() if v is not None)]
 
 
-def graph_dot(links: List[dict], query: str = "", top_n: int = 40) -> Tuple[str, int, int]:
-    """Builds a DOT string from links. Returns (dot, nodes_shown, edges_shown)."""
-    edges = [(strip_md(l.get("from_note")), strip_md(l.get("to_note"))) for l in links]
-    edges = [(a, b) for a, b in edges if a and b and a != b]
+def _graph_selection(links: List[dict], query: str, top_n: int):
+    """Shared filter for the graph views: (edge links kept, degree, matched names)."""
+    pairs = []
+    for l in links:
+        a, b = strip_md(l.get("from_note")), strip_md(l.get("to_note"))
+        if a and b and a != b:
+            pairs.append((a, b, l))
     degree = Counter()
-    for a, b in edges:
+    for a, b, _ in pairs:
         degree[a] += 1
         degree[b] += 1
     keep = {n for n, _ in degree.most_common(top_n)} if top_n else set(degree)
     q = (query or "").strip().lower()
+    matched = set()
     if q:
         matched = {n for n in degree if q in n.lower()}
         keep = set(matched)
-        for a, b in edges:  # include direct neighbours of matches
+        for a, b, _ in pairs:  # include direct neighbours of matches
             if a in matched or b in matched:
                 keep.update((a, b))
-    shown = sorted({(a, b) for a, b in edges if a in keep and b in keep})
-    nodes = {n for e in shown for n in e}
+    return [(a, b, l) for a, b, l in pairs if a in keep and b in keep], degree, matched
 
-    def esc(s: str) -> str:
-        return s.replace("\\", "\\\\").replace('"', '\\"')
 
-    lines = [
-        "digraph G {",
-        '  graph [bgcolor="transparent", overlap=false, splines=true];',
-        '  node [shape=ellipse, style=filled, fillcolor="#7c5cff", fontcolor="white", '
-        'color="#5b3fd6", fontsize=11];',
-        '  edge [color="#9a9aaa", arrowsize=0.6];',
-    ]
-    for n in sorted(nodes):
-        lines.append(f'  "{esc(n)}";')
-    for a, b in shown:
-        lines.append(f'  "{esc(a)}" -> "{esc(b)}";')
-    lines.append("}")
-    return "\n".join(lines), len(nodes), len(shown)
+def graph_data(links: List[dict], query: str = "", top_n: int = 40) -> dict:
+    """Nodes/edges for the interactive graph, de-duplicated per (from, to) pair.
+
+    Returns {"nodes": [{id, label, degree, match}], "edges": [{from, to,
+    relationship, evidence, score}]}; degree counts all links in the vault.
+    """
+    kept, degree, matched = _graph_selection(links, query, top_n)
+    edges = {}
+    for a, b, l in kept:
+        score = l.get("score")
+        try:
+            score = round(float(score), 3) if score is not None else None
+        except (TypeError, ValueError):
+            score = None
+        cur = edges.get((a, b))
+        if cur is None:
+            edges[(a, b)] = {
+                "from": a, "to": b,
+                "relationship": str(l.get("relationship") or ""),
+                "evidence": str(l.get("evidence") or ""),
+                "score": score,
+            }
+        elif score is not None and (cur["score"] is None or score > cur["score"]):
+            cur["score"] = score
+    names = sorted({n for e in edges for n in e})
+    return {
+        "nodes": [{"id": n, "label": n, "degree": degree[n], "match": n in matched} for n in names],
+        "edges": [edges[k] for k in sorted(edges)],
+    }
+
+
+def format_timestamp(value, now: Optional[datetime] = None) -> Tuple[str, str]:
+    """ISO timestamp -> ('Oct 17, 2026 · 21:14', '3h ago'); falls back to the raw text."""
+    try:
+        dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return str(value or ""), ""
+    now = now or datetime.now(dt.tzinfo)
+    secs = (now - dt).total_seconds()
+    if secs < 0:
+        age = ""
+    elif secs < 60:
+        age = "just now"
+    elif secs < 3600:
+        age = f"{int(secs // 60)}m ago"
+    elif secs < 86400:
+        age = f"{int(secs // 3600)}h ago"
+    else:
+        age = f"{int(secs // 86400)}d ago"
+    return f"{dt:%b} {dt.day}, {dt:%Y} · {dt:%H:%M}", age
