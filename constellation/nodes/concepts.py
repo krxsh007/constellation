@@ -158,10 +158,24 @@ def _index_concepts(state: AgentState, verified_concepts):
     if removed:
         log(f"Removed {removed} stale vectors from the local index.")
 
+    # Cached concepts whose vectors are missing -- the index was dropped because
+    # the embedding model changed, it was a legacy pickle index, or it was
+    # deleted. Re-embedding them is cheap compared to re-running the LLM.
+    indexed = vectorstore.indexed_notes(store)
+    missing = [
+        c for c in state.get("concepts") or []
+        if c.get("source_note") in current_titles
+        and c.get("source_note") not in indexed
+        and c.get("source_note") not in stale_titles
+    ]
+    if missing:
+        log(f"Re-embedding {len(missing)} cached concepts missing from the index.")
+    verified_concepts = list(verified_concepts) + missing
+
     if not verified_concepts:
         if removed:
             try:
-                vectorstore.save_index(store, vault_dir)
+                vectorstore.save_index(store, vault_dir, config.embeddings)
             except Exception as e:
                 log(f"Failed to save FAISS index: {e}")
         return
@@ -177,7 +191,7 @@ def _index_concepts(state: AgentState, verified_concepts):
     log(f"Embedding and indexing {len(docs)} concepts into the local FAISS index...")
     try:
         store = vectorstore.add_documents(store, docs, config.embeddings)
-        vectorstore.save_index(store, vault_dir)
+        vectorstore.save_index(store, vault_dir, config.embeddings)
         log(f"Index now holds {vectorstore.count(store)} concept vectors.")
     except Exception as e:
         log(f"Failed to index concepts into FAISS: {e}")

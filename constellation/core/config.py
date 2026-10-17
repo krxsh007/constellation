@@ -133,6 +133,8 @@ EMBED_BASE_DELAY = 2.0
 class RotatingGoogleEmbeddings(Embeddings):
     """Google embeddings with retry, exponential backoff and API key rotation."""
 
+    provider = "google"
+
     def __init__(self, model_name: str = None):
         self._model_name = model_name
 
