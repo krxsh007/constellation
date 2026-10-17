@@ -67,11 +67,14 @@ class TestEndToEnd(ConfigGuard):
 
     def test_dry_run_writes_nothing_and_saves_no_cache(self):
         before = {p.name: p.read_text(encoding="utf-8") for p in self.vault.rglob("*.md")}
-        self.run_pipeline(dry_run=True)
+        state = self.run_pipeline(dry_run=True)
         after = {p.name: p.read_text(encoding="utf-8") for p in self.vault.rglob("*.md")}
         self.assertEqual(before, after)
         self.assertFalse((self.vault / io.CACHE_FILENAME).exists())
         self.assertFalse((self.vault / ".constellation_backups").exists())
+        self.assertFalse((self.vault / ".linker_faiss_index").exists())
+        # The in-memory preview index still lets the relationship stage find links.
+        self.assertIn("[[Beta]]", state["preview"]["Alpha.md"]["after"])
 
     def test_unchanged_rerun_makes_no_llm_calls(self):
         self.run_pipeline()

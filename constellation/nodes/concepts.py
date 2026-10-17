@@ -149,6 +149,15 @@ def _normalise_tags(tags):
     return cleaned
 
 
+def _persist_index(state: AgentState, store, vault_dir: str) -> None:
+    """Saves the index into the vault -- or, in preview mode, keeps it in memory
+    for the relationship extractor so a dry run writes nothing to the vault."""
+    if state.get("dry_run"):
+        vectorstore.hold_preview_index(vault_dir, store)
+    else:
+        vectorstore.save_index(store, vault_dir, config.embeddings)
+
+
 def _index_concepts(state: AgentState, verified_concepts):
     """Refreshes the vault-local FAISS index for the notes touched in this run."""
     vault_dir = state.get("dir", "")
@@ -185,9 +194,11 @@ def _index_concepts(state: AgentState, verified_concepts):
     if not verified_concepts:
         if removed:
             try:
-                vectorstore.save_index(store, vault_dir, config.embeddings)
+                _persist_index(state, store, vault_dir)
             except Exception as e:
                 log(f"Failed to save FAISS index: {e}")
+        elif state.get("dry_run"):
+            vectorstore.hold_preview_index(vault_dir, store)
         return
 
     docs = [
@@ -201,7 +212,7 @@ def _index_concepts(state: AgentState, verified_concepts):
     log(f"Embedding and indexing {len(docs)} concepts into the local FAISS index...")
     try:
         store = vectorstore.add_documents(store, docs, config.embeddings)
-        vectorstore.save_index(store, vault_dir, config.embeddings)
+        _persist_index(state, store, vault_dir)
         log(f"Index now holds {vectorstore.count(store)} concept vectors.")
     except Exception as e:
         log(f"Failed to index concepts into FAISS: {e}")

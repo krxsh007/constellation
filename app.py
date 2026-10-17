@@ -25,19 +25,27 @@ from constellation.ui import helpers
 
 
 def init_state() -> None:
-    """Seeds session_state once so the vault path and options survive reruns."""
-    defaults = {
-        "vault_path": "",
-        "opt_dry_run": True,
-        "opt_force": False,
-        "opt_max_links": max(1, min(20, config.MAX_LINKS_PER_NOTE or 5)),
-        "opt_annotate": config.ANNOTATE_LINKS,
-        "opt_excluded": ", ".join(config.EXCLUDED_DIRS),
-        "opt_backlinks": config.BACKLINKS,
-        "opt_tags_fm": config.TAGS_IN_FRONTMATTER,
-    }
-    for k, v in defaults.items():
-        st.session_state.setdefault(k, v)
+    """Seeds session_state once so the vault path and options survive reruns.
+
+    Options live in a plain dict rather than as widget keys: Streamlit discards
+    a widget's keyed state on any run where the widget isn't drawn (the options
+    panel is hidden until the vault path is valid), which reset them silently.
+    """
+    st.session_state.setdefault("vault_path", "")
+    st.session_state.setdefault("opts", {
+        "dry_run": True,
+        "force": False,
+        "max_links": max(1, min(20, config.MAX_LINKS_PER_NOTE or 5)),
+        "annotate": config.ANNOTATE_LINKS,
+        "excluded": ", ".join(config.EXCLUDED_DIRS),
+        "backlinks": config.BACKLINKS,
+        "tags_fm": config.TAGS_IN_FRONTMATTER,
+    })
+
+
+def _option(widget, label: str, name: str, *args, **kwargs) -> None:
+    opts = st.session_state["opts"]
+    opts[name] = widget(label, *args, value=opts[name], key=f"w_{name}", **kwargs)
 
 
 def parse_keys(text: str):
@@ -145,7 +153,7 @@ def render_vault_panel() -> bool:
     cols[0].metric("Notes", info["notes"])
     cols[1].metric("Excluded folders", info["excluded"])
     cols[2].metric("Cache", "present" if info["cache"] else "none")
-    cols[3].metric("Concept index", "built" if info["index"] else "not built")
+    cols[3].metric("Concept index", "built" if info["index"] else "none")
     cols[4].metric("Last run", info["last_run"] or "never")
     return info["notes"] > 0
 
@@ -156,29 +164,29 @@ def render_options() -> None:
         left, right = st.columns(2)
         with left:
             st.markdown("**Safety**")
-            st.checkbox("Preview only (dry run — don't modify notes)", key="opt_dry_run")
-            st.checkbox("Force: clear cache and concept index first", key="opt_force")
+            _option(st.checkbox, "Preview only (dry run — don't modify notes)", "dry_run")
+            _option(st.checkbox, "Force: clear cache and concept index first", "force")
             st.markdown("**Linking**")
-            st.slider("Max links per note", 1, 20, key="opt_max_links")
-            st.checkbox("Annotate links with reasoning", key="opt_annotate")
+            _option(st.slider, "Max links per note", "max_links", 1, 20)
+            _option(st.checkbox, "Annotate links with reasoning", "annotate")
         with right:
             st.markdown("**Output**")
-            st.checkbox("Write backlinks", key="opt_backlinks",
-                        help="Every link A → B also adds B → A.")
-            st.checkbox("Tags in frontmatter", key="opt_tags_fm",
-                        help="Write tags to the YAML `tags:` list instead of a `## Tags` section.")
+            _option(st.checkbox, "Write backlinks", "backlinks",
+                    help="Every link A → B also adds B → A.")
+            _option(st.checkbox, "Tags in frontmatter", "tags_fm",
+                    help="Write tags to the YAML `tags:` list instead of a `## Tags` section.")
             st.markdown("**Scope**")
-            st.text_input("Excluded folders (comma-separated)", key="opt_excluded",
-                          help="e.g. Templates, Archive, Daily Notes")
+            _option(st.text_input, "Excluded folders (comma-separated)", "excluded",
+                    help="e.g. Templates, Archive, Daily Notes")
 
 
 def apply_options() -> None:
-    s = st.session_state
-    config.set_max_links(s["opt_max_links"])
-    config.set_annotate_links(s["opt_annotate"])
-    config.set_excluded_dirs(s["opt_excluded"])
-    config.set_backlinks(bool(s["opt_backlinks"]))
-    config.set_tags_in_frontmatter(bool(s["opt_tags_fm"]))
+    o = st.session_state["opts"]
+    config.set_max_links(o["max_links"])
+    config.set_annotate_links(o["annotate"])
+    config.set_excluded_dirs(o["excluded"])
+    config.set_backlinks(bool(o["backlinks"]))
+    config.set_tags_in_frontmatter(bool(o["tags_fm"]))
 
 
 def show_error(e: Exception) -> None:
@@ -200,7 +208,7 @@ def execute_run(path: str) -> None:
         return
 
     apply_options()
-    dry_run = st.session_state["opt_dry_run"]
+    dry_run = st.session_state["opts"]["dry_run"]
     lines: list = []
     current = {"stage": None}
     started = time.time()
@@ -222,7 +230,7 @@ def execute_run(path: str) -> None:
 
         logmod.set_sink(sink)
         try:
-            if st.session_state["opt_force"]:
+            if st.session_state["opts"]["force"]:
                 st.toast(f"Reset: {reset_vault_state(path)}")
             result = run_pipeline(path, dry_run=dry_run)
             st.session_state.update(

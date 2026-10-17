@@ -179,5 +179,23 @@ def add_documents(store: Optional[FAISS], docs: List[Document], embeddings) -> F
         raise
 
 
+# Preview (dry-run) runs promise to leave the vault untouched, so the index they
+# build is handed from the concept verifier to the relationship extractor here
+# instead of being saved inside the vault.
+_preview_stores: dict = {}
+
+
+def _preview_key(vault_dir: str) -> str:
+    return str(Path(vault_dir).expanduser().resolve())
+
+
+def hold_preview_index(vault_dir: str, store: Optional[FAISS]) -> None:
+    _preview_stores[_preview_key(vault_dir)] = store
+
+
+def take_preview_index(vault_dir: str) -> Optional[FAISS]:
+    return _preview_stores.pop(_preview_key(vault_dir), None)
+
+
 def count(store: Optional[FAISS]) -> int:
     return 0 if store is None else len(store.docstore._dict)

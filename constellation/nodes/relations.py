@@ -100,7 +100,9 @@ async def relationship_extractor(state: AgentState):
             log("No new concepts extracted. Skipping relationship extraction.")
             return {"raw_links": [], "pair_similarity": {}}
 
-    store = await asyncio.to_thread(vectorstore.load_index, state.get("dir", ""), config.embeddings)
+    store = vectorstore.take_preview_index(state.get("dir", "")) if state.get("dry_run") else None
+    if store is None:
+        store = await asyncio.to_thread(vectorstore.load_index, state.get("dir", ""), config.embeddings)
     if store is None:
         log("No FAISS index available -- cannot search for related concepts.")
         return {"raw_links": [], "pair_similarity": {}}
