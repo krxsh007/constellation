@@ -17,7 +17,7 @@ st.set_page_config(page_title="Constellation", page_icon="🌌", layout="wide")
 
 from constellation.core import config, log as logmod, vectorstore
 from constellation.core.backup import list_backups, restore_backup
-from constellation.core.lock import VaultLockedError
+from constellation.core.lock import VaultLockedError, vault_lock
 from constellation.core.utils import clean_path
 from constellation.nodes.io import CACHE_FILENAME, count_notes, reset_vault_state, strip_vault
 from constellation.ui import helpers
@@ -392,7 +392,9 @@ def render_backups(path: str) -> None:
         c3.write(f"{b.get('file_count', '?')} files")
         if c4.button("Restore", key=f"restore_{b.get('name')}"):
             try:
-                st.success(f"Restored {restore_backup(path, b['name'])} file(s) from {b['name']}.")
+                with vault_lock(path):
+                    restored = restore_backup(path, b["name"])
+                st.success(f"Restored {restored} file(s) from {b['name']}.")
             except Exception as e:
                 show_error(e)
 
