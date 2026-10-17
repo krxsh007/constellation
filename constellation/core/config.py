@@ -1,4 +1,5 @@
-"""API keys, model names and the rotating Google embedding client.
+"""API keys, providers, model names, feature flags and the embedding client
+(rotating Google keys, or a local Ollama server).
 
 Nothing in here prompts for input at import time -- importing this module must
 stay side-effect free enough to be safe inside a Streamlit script run. Missing

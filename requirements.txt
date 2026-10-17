@@ -8,3 +8,6 @@ faiss-cpu
 pydantic
 python-dotenv
 requests
+
+# Optional: only for LLM_PROVIDER=ollama / EMBEDDING_PROVIDER=ollama (imported lazily)
+# langchain-ollama
