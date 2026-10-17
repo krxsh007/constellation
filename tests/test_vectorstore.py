@@ -46,7 +46,9 @@ class FakeEmbeddings(Embeddings):
         return [b / 255.0 for b in digest[: self.dim]]
 
     def embed_documents(self, texts):
+        from constellation.core import usage
         self.calls += 1
+        usage.record_embedding_call()
         return [self._vec(t) for t in texts]
 
     def embed_query(self, text):

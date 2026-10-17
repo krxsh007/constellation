@@ -9,6 +9,7 @@ from constellation.core.log import log
 from constellation.core.prompts import prompt_concept_extraction, prompt_concept_verification
 from constellation.core.state import AgentState, ConceptExtractionOutput
 from constellation.core.utils import abatch_invoke_with_retry, minify_concepts, prepare_note_text
+from constellation.nodes.io import save_checkpoint
 
 
 def _mark_failed(failed_notes: list, title: str) -> None:
@@ -62,10 +63,15 @@ async def concept_verifier(state: AgentState):
     tags_by_note = dict(state.get("tags_by_note") or {})
     failed_notes = list(state.get("failed_notes") or [])
 
+    # Concepts of notes an interrupted run checkpointed but never linked count
+    # as "new" again so relationship extraction picks them up.
+    resumed = set(state.get("resumed_notes") or [])
+    resumed_concepts = [c for c in state.get("concepts") or [] if c.get("source_note") in resumed]
+
     new_notes = state.get("new_notes") or []
     if not new_notes:
         return {
-            "new_concepts": [],
+            "new_concepts": resumed_concepts,
             "concepts": state.get("concepts") or [],
             "tags_by_note": tags_by_note,
             "failed_notes": failed_notes,
@@ -114,12 +120,16 @@ async def concept_verifier(state: AgentState):
     await asyncio.to_thread(_index_concepts, state, all_verified_concepts)
 
     log(f"Total verified concepts from new notes: {len(all_verified_concepts)}")
-    return {
-        "new_concepts": all_verified_concepts,
+    update = {
+        "new_concepts": all_verified_concepts + resumed_concepts,
         "concepts": (state.get("concepts") or []) + all_verified_concepts,
         "tags_by_note": tags_by_note,
         "failed_notes": failed_notes,
     }
+    # Checkpoint the extraction spend before the (crash-prone) later stages.
+    verified_titles = [n["title"] for n in new_notes if n["title"] not in failed_notes]
+    save_checkpoint({**state, **update}, verified_titles)
+    return update
 
 
 def _normalise_tags(tags):

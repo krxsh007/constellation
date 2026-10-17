@@ -66,3 +66,17 @@ class AgentState(TypedDict):
     rendered_links: dict
     # Folder holding the pre-write snapshot of this run, if anything was written.
     backup_dir: Optional[str]
+    # Frontmatter tags Constellation added per note: last run's (from the cache)
+    # and this run's. Only these are ever removed -- never the user's own tags.
+    previous_fm_tags: dict
+    fm_tags_by_note: dict
+    # Rendering settings of the last run; a change forces a redraw.
+    previous_settings: dict
+    # Notes checkpointed (extracted) by an interrupted run that still need links.
+    resumed_notes: List[str]
+    # Dry runs only: {title: {"before": str, "after": str}}.
+    preview: Dict[str, dict]
+    # Absolute path -> hash of the content we wrote (watch mode ignores these).
+    written_hashes: dict
+    started_at: str
+    run_report: dict

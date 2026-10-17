@@ -6,7 +6,7 @@ from typing import List, get_args
 
 from langchain_groq import ChatGroq
 
-from constellation.core import config
+from constellation.core import config, usage
 from constellation.core.log import log
 
 current_key_index = 0
@@ -156,7 +156,21 @@ def _is_reasoning_model(model_name: str) -> bool:
     return any(marker in lowered for marker in _REASONING_MODEL_MARKERS)
 
 
-def _create_llm(model_name: str, api_key_index: int = None) -> ChatGroq:
+def _create_ollama_llm():
+    """Local chat model. One model serves every stage: the per-stage Groq model
+    names (LLM_EXTRACTION etc.) are hosted model IDs that mean nothing to Ollama."""
+    ollama = config.import_ollama()
+    return ollama.ChatOllama(
+        model=config.OLLAMA_LLM_MODEL,
+        base_url=config.OLLAMA_BASE_URL,
+        temperature=0,
+        num_predict=config.LLM_MAX_OUTPUT_TOKENS,
+    )
+
+
+def _create_llm(model_name: str, api_key_index: int = None):
+    if config.LLM_PROVIDER == "ollama":
+        return _create_ollama_llm()
     index = current_key_index if api_key_index is None else api_key_index
     extra = {}
     effort = getattr(config, "LLM_REASONING_EFFORT", "")
@@ -218,9 +232,30 @@ def _augmented_prompt(prompt, pydantic_schema):
 
 def _structured_chain(prompt, model_name: str, pydantic_schema, api_key_index: int = None):
     """Use json_mode: model outputs free-form JSON, LangChain validates against the schema."""
+    from langchain_core.runnables import RunnableLambda
+
     llm = _create_llm(model_name, api_key_index)
-    structured = llm.with_structured_output(pydantic_schema, method="json_mode")
-    return _augmented_prompt(prompt, pydantic_schema) | structured
+    # include_raw keeps the AIMessage (and its token usage) next to the parsed
+    # object; _unwrap_structured re-raises parse errors so retries still see them.
+    structured = llm.with_structured_output(pydantic_schema, method="json_mode", include_raw=True)
+    return _augmented_prompt(prompt, pydantic_schema) | structured | RunnableLambda(_unwrap_structured)
+
+
+def _unwrap_structured(result):
+    """Turn an include_raw result back into the parsed object, recording usage."""
+    if not (isinstance(result, dict) and "raw" in result and "parsed" in result):
+        return result
+    raw = result.get("raw")
+    if raw is not None:
+        usage.record_llm_response(raw)
+    error = result.get("parsing_error")
+    if error is not None:
+        raise error
+    parsed = result.get("parsed")
+    if parsed is None:
+        _response_text(raw)  # raises a precise error for empty completions
+        raise LLMResponseError("Model response unusable: structured output parsed to nothing.")
+    return parsed
 
 
 def _extract_json_text(raw: str) -> str:
@@ -506,6 +541,7 @@ async def _raw_invoke(prompt, model_name: str, pydantic_schema, inputs: dict,
     llm = _create_llm(model_name, api_key_index)
     chain = _augmented_prompt(prompt, pydantic_schema) | llm
     result = await chain.ainvoke(_shrink_llm_inputs(inputs, note_char_limit))
+    usage.record_llm_response(result)
     return _fallback_parse(_response_text(result), pydantic_schema)
 
 
@@ -515,6 +551,7 @@ def _raw_invoke_sync(prompt, model_name: str, pydantic_schema, inputs: dict,
     llm = _create_llm(model_name)
     chain = _augmented_prompt(prompt, pydantic_schema) | llm
     result = chain.invoke(_shrink_llm_inputs(inputs, note_char_limit))
+    usage.record_llm_response(result)
     return _fallback_parse(_response_text(result), pydantic_schema)
 
 

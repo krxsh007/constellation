@@ -86,9 +86,125 @@ def strip_auto_sections(content: str) -> str:
     return "\n".join(kept).rstrip()
 
 
-def get_core_hash(content: str) -> str:
-    """MD5 of the note content, ignoring the auto-generated Tags/Related Links sections."""
+def get_core_hash(content: str, tool_tags=None) -> str:
+    """MD5 of the note content, ignoring the auto-generated Tags/Related Links
+    sections and any frontmatter tags Constellation added (tool_tags) -- without
+    that, writing frontmatter tags would make every note look edited next run."""
+    if tool_tags:
+        content = apply_frontmatter_tags(content, [], tool_tags)[0]
     return hashlib.md5(strip_auto_sections(content).encode("utf-8")).hexdigest()
+
+
+# --- Minimal YAML frontmatter handling ---------------------------------------
+# Only the top-level `tags:` key is ever touched, line by line, so the rest of
+# the user's frontmatter (comments, ordering, quoting) survives byte-for-byte.
+# A full YAML round-trip would reformat it on every run.
+
+_FM_TAGS_KEY = re.compile(r"^(tags|tag)\s*:\s*(.*)$")
+_FM_LIST_ITEM = re.compile(r"^\s+-\s*(.*)$|^-\s+(.*)$")
+
+
+def _split_frontmatter(content: str):
+    """Returns (frontmatter_lines, body) or (None, content) if there is none."""
+    if not content.startswith("---"):
+        return None, content
+    lines = content.split("\n")
+    if lines[0].strip() != "---":
+        return None, content
+    for i in range(1, len(lines)):
+        if lines[i].strip() in ("---", "..."):
+            return lines[1:i], "\n".join(lines[i + 1:])
+    return None, content
+
+
+def _tag_norm(tag: str) -> str:
+    return str(tag).strip().strip("'\"").lstrip("#").strip().lower()
+
+
+def _parse_fm_tags(fm_lines):
+    """Finds the top-level tags key: (start, end, key, style, values) or None.
+
+    Supports `tags: [a, b]` (inline), a `tags:` block list, and `tags: a, b`
+    (scalar, rewritten as a block list if we change it).
+    """
+    for i, line in enumerate(fm_lines):
+        m = _FM_TAGS_KEY.match(line)
+        if not m:
+            continue
+        key, rest = m.group(1), m.group(2).strip()
+        if rest.startswith("[") and rest.endswith("]"):
+            values = [v.strip() for v in rest[1:-1].split(",") if v.strip()]
+            return i, i + 1, key, "inline", values
+        if rest:
+            values = [v for v in re.split(r"[,\s]+", rest) if v]
+            return i, i + 1, key, "scalar", values
+        values = []
+        j = i + 1
+        while j < len(fm_lines):
+            item = _FM_LIST_ITEM.match(fm_lines[j])
+            if not item:
+                break
+            value = (item.group(1) or item.group(2) or "").strip()
+            if value:
+                values.append(value)
+            j += 1
+        return i, j, key, "block", values
+    return None
+
+
+def apply_frontmatter_tags(content: str, add_tags, remove_tags):
+    """Removes remove_tags (tags Constellation added previously) from the
+    frontmatter `tags:` list, then adds add_tags that the user does not already
+    have. Returns (new_content, added) where added are the tags WE contributed --
+    the cache tracks them so a later run removes only those, never user tags.
+
+    Creates the frontmatter if needed; removes the `tags:` key / the whole
+    frontmatter again when it ends up empty, so add-then-remove is lossless.
+    """
+    remove_norm = {_tag_norm(t) for t in (remove_tags or []) if _tag_norm(t)}
+    wanted = []
+    for t in add_tags or []:
+        clean = str(t).strip().lstrip("#").strip()
+        if clean and _tag_norm(clean) not in {_tag_norm(w) for w in wanted}:
+            wanted.append(clean)
+
+    fm, body = _split_frontmatter(content)
+    if fm is None:
+        if not wanted:
+            return content, []
+        fm, body = [], content
+
+    found = _parse_fm_tags(fm)
+    if found:
+        start, end, key, style, values = found
+    else:
+        start = end = len(fm)
+        key, style, values = "tags", "block", []
+
+    kept = [v for v in values if _tag_norm(v) not in remove_norm]
+    removed_any = len(kept) != len(values)
+    present = {_tag_norm(v) for v in kept}
+    added = []
+    for tag in wanted:
+        if _tag_norm(tag) not in present:
+            kept.append(tag)
+            present.add(_tag_norm(tag))
+            added.append(tag)
+
+    if not added and not removed_any:
+        return content, []
+
+    if not kept:
+        tag_lines = []
+    elif style == "inline":
+        tag_lines = [f"{key}: [{', '.join(kept)}]"]
+    else:
+        tag_lines = [f"{key}:"] + [f"  - {v}" for v in kept]
+
+    new_fm = fm[:start] + tag_lines + fm[end:]
+    if not any(line.strip() for line in new_fm):
+        return body, added
+    return "---\n" + "\n".join(new_fm) + "\n---\n" + body, added
 
 
 def iter_notes(directory: Path, excluded_dirs=None):
@@ -112,6 +228,21 @@ def iter_notes(directory: Path, excluded_dirs=None):
         if any(rel_posix == pat or rel_posix.startswith(pat + "/") for pat in excluded_patterns):
             continue
         yield file
+
+
+def iter_titled_notes(directory: Path):
+    """Yields (title, file). Titles are file names; a later duplicate name gets
+    'parent/name' so every note has a unique key in the cache."""
+    directory = Path(directory)
+    seen = set()
+    for file in iter_notes(directory):
+        title = file.name
+        if title in seen:
+            rel_str = str(file.relative_to(directory).as_posix())
+            log(f"Warning: duplicate filename '{file.name}' found at '{rel_str}'. Disambiguating note title as '{file.parent.name}/{file.name}'.")
+            title = f"{file.parent.name}/{file.name}"
+        seen.add(title)
+        yield title, file
 
 
 def count_notes(directory, excluded_dirs=None) -> int:
@@ -153,8 +284,8 @@ def _load_cache(vault: Path) -> dict:
 def strip_vault(vault_path, dry_run: bool = False) -> dict:
     """Removes everything Constellation ever wrote into the vault's notes.
 
-    Every note loses its generated ``## Tags`` / ``## Related Links`` sections,
-    then the cache and index are deleted so the vault is back to a pre-tool
+    Every note loses its generated ``## Tags`` / ``## Related Links`` sections
+    and the frontmatter tags Constellation added (user tags stay), then the cache and index are deleted so the vault is back to a pre-tool
     state. Notes are backed up first, so even this is undoable. With dry_run
     nothing is touched and notes_cleaned is the number that WOULD change.
     Returns {"notes_cleaned": int, "backup_dir": str | None}.
@@ -164,14 +295,16 @@ def strip_vault(vault_path, dry_run: bool = False) -> dict:
         raise ValueError(f"The path '{vault_path}' is not a valid directory.")
 
     with vault_lock(vault):
+        # Frontmatter tags we added are only identifiable through the cache.
+        fm_tags = _load_cache(vault).get("frontmatter_tags") or {}
         changes = []
-        for file in iter_notes(vault):
+        for title, file in iter_titled_notes(vault):
             try:
                 content = file.read_text(encoding="utf-8")
             except Exception as e:
-                log(f"Warning: skipping '{file.name}' ({e})")
+                log(f"Warning: skipping '{title}' ({e})")
                 continue
-            cleaned = strip_auto_sections(content)
+            cleaned = strip_auto_sections(apply_frontmatter_tags(content, [], fm_tags.get(title))[0])
             if cleaned.rstrip() == content.rstrip():
                 continue
             changes.append((file, (cleaned + "\n") if cleaned else ""))
@@ -214,27 +347,23 @@ def vault_reader(state: AgentState):
     all_cached_concepts = cache.get("concepts") or []
     all_cached_links = cache.get("links") or []
     cached_tags = cache.get("tags") or {}
+    cached_fm_tags = cache.get("frontmatter_tags") or {}
+    pending = set(cache.get("pending") or [])
 
     notes = []
     new_notes = []
     current_hashes = {}
     current_titles = set()
 
-    for file in iter_notes(directory):
-        title = file.name
+    for title, file in iter_titled_notes(directory):
         try:
             content = file.read_text(encoding="utf-8")
         except Exception as e:
             log(f"Warning: skipping '{title}' ({e})")
             continue
 
-        if title in current_titles:
-            rel_str = str(file.relative_to(directory).as_posix())
-            log(f"Warning: duplicate filename '{file.name}' found at '{rel_str}'. Disambiguating note title as '{file.parent.name}/{file.name}'.")
-            title = f"{file.parent.name}/{file.name}"
-
         current_titles.add(title)
-        content_hash = get_core_hash(content)
+        content_hash = get_core_hash(content, cached_fm_tags.get(title))
         current_hashes[title] = content_hash
 
         note_obj = {"title": title, "path": str(file.resolve()), "content": content}
@@ -245,13 +374,20 @@ def vault_reader(state: AgentState):
 
     reprocessed = {n["title"] for n in new_notes}
     valid_titles = current_titles - reprocessed
+    # Notes a crashed run had already extracted (checkpoint) but never linked:
+    # their concepts are reused, but they still need relationship extraction.
+    resumed = sorted(t for t in valid_titles if t in pending)
+    if resumed:
+        log(f"Resuming {len(resumed)} note(s) checkpointed by an interrupted run.")
 
     retained_concepts = [c for c in all_cached_concepts if c.get("source_note") in valid_titles]
     # Only links FROM re-processed notes are regenerated. A link A->B where B was
     # edited is still valid as long as A is unchanged and B exists, so keep it.
     retained_links = [
         l for l in all_cached_links
-        if l.get("from_note") in valid_titles and l.get("to_note") in current_titles
+        if l.get("from_note") in valid_titles
+        and l.get("from_note") not in pending
+        and l.get("to_note") in current_titles
     ]
     retained_tags = {k: v for k, v in cached_tags.items() if k in valid_titles}
 
@@ -285,6 +421,20 @@ def vault_reader(state: AgentState):
         "previous_links": list(all_cached_links),
         "previous_tags": dict(cached_tags),
         "previous_rendered": previous_rendered,
+        "previous_fm_tags": dict(cached_fm_tags),
+        # Missing for caches written before settings were tracked: assume
+        # nothing changed rather than rewriting the whole vault.
+        "previous_settings": cache.get("settings") or render_settings(),
+        "resumed_notes": resumed,
+    }
+
+
+def render_settings() -> dict:
+    """Settings that change how notes are rendered without changing which links
+    exist. If any differs from the last run, every linked/tagged note is redrawn."""
+    return {
+        "annotate": bool(config.ANNOTATE_LINKS),
+        "tags_in_frontmatter": bool(config.TAGS_IN_FRONTMATTER),
     }
 
 
@@ -453,6 +603,12 @@ def _write_atomic(file_path: Path, content: str) -> None:
         raise
 
 
+def content_hash(content: str) -> str:
+    """Hash of the full file content (unlike get_core_hash, nothing is ignored).
+    Watch mode uses it to recognise files the tool itself just wrote."""
+    return hashlib.md5(content.encode("utf-8")).hexdigest()
+
+
 def link_writer(state: AgentState):
     log("\n--- [Link Writer] ---")
     dry_run = state.get("dry_run", False)
@@ -464,6 +620,8 @@ def link_writer(state: AgentState):
     note_to_path = {n["title"]: n["path"] for n in notes}
     note_to_content = {n["title"]: n["content"] for n in notes}
     failed = set(state.get("failed_notes") or [])
+    fm_mode = bool(config.TAGS_IN_FRONTMATTER)
+    previous_fm_tags = state.get("previous_fm_tags") or {}
 
     links, tags_by_note = _carry_forward_failed(state, titles)
     effective = build_effective_links(links, existing_titles=titles)
@@ -473,14 +631,22 @@ def link_writer(state: AgentState):
     # Rewrite every note that was (successfully) re-processed, plus any note
     # whose rendered link set changed -- that covers notes that gained a link
     # AND notes that lost one because its target was deleted or renamed.
-    processed = {n["title"] for n in state.get("new_notes") or []} - failed
+    processed = ({n["title"] for n in state.get("new_notes") or []}
+                 | set(state.get("resumed_notes") or [])) - failed
     changed = {
         t for t in titles
         if set(current_rendered.get(t, [])) != set(previous_rendered.get(t, []))
     }
-    notes_to_update = (processed | changed) - failed
+    notes_to_update = processed | changed
+    if (state.get("previous_settings") or render_settings()) != render_settings():
+        # Annotation or tag placement changed: redraw everything we ever wrote.
+        log("Rendering settings changed since the last run; refreshing all linked/tagged notes.")
+        notes_to_update |= set(current_rendered) | set(tags_by_note) | set(previous_fm_tags)
+    notes_to_update = (notes_to_update & titles) - failed
 
     planned = []
+    fm_tags_by_note = {t: list(v) for t, v in previous_fm_tags.items() if t in titles}
+    planned_fm = {}
     for note_title in sorted(notes_to_update):
         file_path_str = note_to_path.get(note_title)
         original_content = note_to_content.get(note_title)
@@ -492,7 +658,14 @@ def link_writer(state: AgentState):
             {"target": _wikilink_name(i["target"]), "evidence": i["evidence"], "score": i["score"]}
             for i in effective.get(note_title, [])
         ]
-        new_content = render_note(strip_auto_sections(original_content), note_tags, targets)
+        new_content = render_note(
+            strip_auto_sections(original_content), None if fm_mode else note_tags, targets
+        )
+        # Always strip the frontmatter tags we added last time (the user may have
+        # switched modes); re-add them only in frontmatter mode.
+        new_content, added_fm = apply_frontmatter_tags(
+            new_content, (note_tags or []) if fm_mode else [], previous_fm_tags.get(note_title)
+        )
         # Trailing-whitespace-only differences are not worth touching a file for.
         if new_content.rstrip() == original_content.rstrip():
             continue
@@ -502,6 +675,7 @@ def link_writer(state: AgentState):
             updates.append(f"{len(note_tags)} tags")
         summary = " and ".join(updates) or "removed stale links"
         planned.append((note_title, Path(file_path_str), original_content, new_content, summary))
+        planned_fm[note_title] = added_fm
 
     backup_dir = None
     write_failed = set()
@@ -517,9 +691,12 @@ def link_writer(state: AgentState):
 
     written = 0
     skipped_due_to_edit = []
+    preview = {}
+    written_hashes = {}
     for note_title, file_path, original_content, new_content, summary in planned:
         if dry_run:
             log(f"Would write {summary} to {note_title}")
+            preview[note_title] = {"before": original_content, "after": new_content}
             written += 1
             continue
 
@@ -540,6 +717,11 @@ def link_writer(state: AgentState):
         try:
             _write_atomic(file_path, new_content)
             written += 1
+            written_hashes[str(file_path)] = content_hash(new_content)
+            if planned_fm.get(note_title):
+                fm_tags_by_note[note_title] = planned_fm[note_title]
+            else:
+                fm_tags_by_note.pop(note_title, None)
             log(f"Wrote {summary} to {note_title}")
         except Exception as e:
             write_failed.add(note_title)
@@ -564,7 +746,107 @@ def link_writer(state: AgentState):
         "skipped_due_to_edit": skipped_due_to_edit,
         "backup_dir": backup_dir,
         "rendered_links": {k: v for k, v in rendered_out.items() if v},
+        "fm_tags_by_note": fm_tags_by_note,
+        "preview": preview,
+        "written_hashes": written_hashes,
     }
+
+
+def _write_cache(cache_path, cache_data: dict) -> bool:
+    try:
+        tmp = Path(str(cache_path) + ".tmp")
+        tmp.write_text(json.dumps(cache_data, indent=2), encoding="utf-8")
+        tmp.replace(cache_path)
+        return True
+    except Exception as e:
+        log(f"Warning: failed to save cache: {e}")
+        return False
+
+
+def save_checkpoint(state: AgentState, verified_titles) -> None:
+    """Persists the extraction results right after concept verification.
+
+    Extraction is the expensive part of a run; if relationship extraction or
+    writing crashes afterwards, the next run reuses these concepts instead of
+    paying for them again. Everything that describes what is ON DISK (links,
+    rendered sets, frontmatter tags) is left as it was, and the notes are marked
+    "pending" so the next run still links them. Real runs only.
+    """
+    if state.get("dry_run") or not state.get("cache_path"):
+        return
+    verified_titles = [t for t in verified_titles if t in (state.get("file_hashes") or {})]
+    if not verified_titles:
+        return
+    cache = _load_cache(Path(state["cache_path"]).parent)
+    files = dict(cache.get("files") or {})
+    for title in verified_titles:
+        files[title] = {"hash": state["file_hashes"][title]}
+    cache["files"] = files
+    cache["concepts"] = state.get("concepts") or []
+    cache["tags"] = {**(cache.get("tags") or {}), **(state.get("tags_by_note") or {})}
+    cache["pending"] = sorted(set(cache.get("pending") or []) | set(verified_titles))
+    if _write_cache(state["cache_path"], cache):
+        log(f"Checkpoint saved: {len(verified_titles)} note(s) extracted.")
+
+
+def _iso_now() -> str:
+    from datetime import datetime
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def build_run_report(state: AgentState) -> dict:
+    """A machine-readable summary of the run (also shown in the CLI / UI)."""
+    from datetime import datetime
+    from constellation.core import usage
+
+    started_at = state.get("started_at") or _iso_now()
+    try:
+        duration = (datetime.now().astimezone() - datetime.fromisoformat(started_at)).total_seconds()
+    except (TypeError, ValueError):
+        duration = 0.0
+
+    previous_pairs = {(l.get("from_note"), l.get("to_note")) for l in state.get("previous_links") or []}
+    current_pairs = {(l.get("from_note"), l.get("to_note")) for l in state.get("links") or []}
+    failed = sorted(state.get("failed_notes") or [])
+    counters = usage.snapshot()
+    return {
+        "started_at": started_at,
+        "duration_s": round(max(duration, 0.0), 2),
+        "notes_total": len(state.get("notes") or []),
+        "notes_processed": len({n["title"] for n in state.get("new_notes") or []} - set(failed)),
+        "notes_failed": failed,
+        "notes_written": int(state.get("notes_written") or 0),
+        "links_total": len(current_pairs),
+        "links_new": len(current_pairs - previous_pairs),
+        "links_removed": len(previous_pairs - current_pairs),
+        "llm_calls": counters["llm_calls"],
+        "input_tokens": counters["input_tokens"],
+        "output_tokens": counters["output_tokens"],
+        "embedding_calls": counters["embedding_calls"],
+        "skipped_due_to_edit": sorted(state.get("skipped_due_to_edit") or []),
+        "backup_dir": state.get("backup_dir"),
+        "dry_run": bool(state.get("dry_run", False)),
+    }
+
+
+def format_run_report(report: dict) -> str:
+    """Compact human-readable version of build_run_report's output."""
+    lines = [
+        f"Notes: {report['notes_total']} total, {report['notes_processed']} processed, "
+        f"{len(report['notes_failed'])} failed, {report['notes_written']} "
+        f"{'would be written' if report['dry_run'] else 'written'}",
+        f"Links: {report['links_total']} total (+{report['links_new']} / -{report['links_removed']})",
+        f"LLM: {report['llm_calls']} calls, {report['input_tokens']} in / {report['output_tokens']} out tokens | "
+        f"Embedding requests: {report['embedding_calls']}",
+        f"Duration: {report['duration_s']}s",
+    ]
+    if report["notes_failed"]:
+        lines.append(f"Failed (retried next run): {', '.join(report['notes_failed'])}")
+    if report["skipped_due_to_edit"]:
+        lines.append(f"Skipped (edited during run): {', '.join(report['skipped_due_to_edit'])}")
+    if report["backup_dir"]:
+        lines.append(f"Backup: {report['backup_dir']}")
+    return "\n".join(lines)
 
 
 def summary_reporter(state: AgentState):
@@ -579,9 +861,11 @@ def summary_reporter(state: AgentState):
     if skipped:
         log(f"{len(skipped)} note(s) were edited during the run and will be re-processed next run.")
 
+    report = build_run_report(state)
+
     if state.get("dry_run", False):
         log("Preview mode: cache not written, so the next real run will redo this work.")
-        return {}
+        return {"run_report": report}
 
     cache_path = state.get("cache_path")
     if cache_path:
@@ -598,14 +882,17 @@ def summary_reporter(state: AgentState):
             "links": links,
             "tags": state.get("tags_by_note") or {},
             "rendered": state.get("rendered_links") or {},
+            "frontmatter_tags": state.get("fm_tags_by_note") or {},
+            "settings": render_settings(),
         }
-        try:
-            with open(cache_path, "w", encoding="utf-8") as f:
-                json.dump(cache_data, f, indent=2)
+        if _write_cache(cache_path, cache_data):
             log(f"Saved cache to {cache_path}")
+
+        report_path = Path(cache_path).parent / REPORT_FILENAME
+        try:
+            report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         except Exception as e:
-            log(f"Warning: failed to save cache: {e}")
+            log(f"Warning: failed to save run report: {e}")
 
-    return {}
-
+    return {"run_report": report}
 
