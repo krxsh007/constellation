@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from langchain_core.messages import AIMessage
+
 from constellation.core import config, utils
 from constellation.core.state import ConceptExtractionOutput, RelationshipExtractionOutput
 
@@ -88,7 +89,7 @@ class TestLLMParsing(unittest.TestCase):
         self.assertEqual([c.concept_name for c in out.concepts], ["Docker"])
 
     def test_hard_failures_raise(self):
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             utils._fallback_parse("no json here at all", ConceptExtractionOutput)
 
         with self.assertRaises(utils.LLMResponseError) as cm:

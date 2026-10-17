@@ -2,6 +2,7 @@ from typing import Dict, List, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
+
 class ConceptModel(BaseModel):
     concept_name: str = Field(description="The name of the concept.")
     category: str = Field(description="The broad category this concept belongs to.")

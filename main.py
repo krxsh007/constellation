@@ -12,7 +12,7 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
 from constellation.core import config, usage, utils
 from constellation.core.lock import VaultLockedError, vault_lock
@@ -312,6 +312,7 @@ def apply_args_to_config(args) -> None:
 def cli(argv=None):
     import os
     import sys
+
     from constellation.core.backup import list_backups, restore_backup
     from constellation.nodes.io import reset_vault_state, strip_vault
 

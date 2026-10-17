@@ -15,7 +15,8 @@ import streamlit as st
 
 st.set_page_config(page_title="Constellation", page_icon="🌌", layout="wide")
 
-from constellation.core import config, log as logmod, vectorstore
+from constellation.core import config, vectorstore
+from constellation.core import log as logmod
 from constellation.core.backup import list_backups, restore_backup
 from constellation.core.lock import VaultLockedError, vault_lock
 from constellation.core.utils import clean_path

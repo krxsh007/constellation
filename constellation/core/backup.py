@@ -32,7 +32,7 @@ def _relative(vault: Path, note_path) -> Path:
     try:
         return resolved.relative_to(vault.resolve())
     except ValueError:
-        raise ValueError(f"'{note_path}' is outside the vault; refusing to back it up.")
+        raise ValueError(f"'{note_path}' is outside the vault; refusing to back it up.") from None
 
 
 def create_backup(vault_path, note_paths: Iterable) -> Path:

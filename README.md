@@ -1,5 +1,7 @@
 # Constellation
 
+[![CI](https://github.com/krxsh007/constellation/actions/workflows/ci.yml/badge.svg)](https://github.com/krxsh007/constellation/actions/workflows/ci.yml)
+
 A local Streamlit app that organizes your Obsidian vault. Point it at a vault folder and it reads your markdown notes, extracts the core concepts with an LLM, then writes Obsidian tags and `[[wikilinks]]` back into the files — turning isolated notes into an interconnected constellation in your graph view.
 
 The app, the cache and the vector index all live on your machine. What leaves it depends on the providers you pick:
@@ -190,6 +192,17 @@ All of these are safe to delete (they'll be rebuilt), except that deleting backu
 - `.linker_report.json` — the report of the last real run.
 - `.constellation_backups/<YYYYmmdd-HHMMSS>/` — copies of the notes taken right before each run modified them (newest `MAX_BACKUPS` kept).
 - `.linker.lock` — present only while a run is in progress (holds the pid and start time). A lock whose process is gone or that is older than 6 hours is treated as stale.
+
+## Development
+
+```bash
+pip install -e '.[dev]'                 # editable install + ruff and pytest
+constellation /path/to/vault --dry-run  # the CLI entry point (same as python3 main.py)
+python3 -m unittest discover tests      # offline test suite, no API keys needed
+ruff check .                            # lint
+```
+
+Supported Python versions are 3.11 to 3.13. CI runs lint and tests on all three.
 
 ## License
 
