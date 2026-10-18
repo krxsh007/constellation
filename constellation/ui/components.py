@@ -72,16 +72,12 @@ def svg_img(svg: str, width: int, height: int, cls: str = "") -> str:
 
 
 _LOGO_SVG = """<svg viewBox="0 0 48 48" width="48" height="48">
-<defs><radialGradient id="cxStar" cx="50%" cy="50%" r="50%">
-<stop offset="0%" stop-color="#ffffff"/><stop offset="45%" stop-color="#c9c1ff"/>
-<stop offset="100%" stop-color="#8b7cff" stop-opacity="0"/></radialGradient></defs>
-<g stroke="#8b7cff" stroke-opacity=".55" stroke-width="1.2" fill="none">
-<path d="M8 33 L18 14 L30 21 L40 9"/><path d="M30 21 L35 37 L18 14"/></g>
-<g fill="url(#cxStar)"><circle cx="8" cy="33" r="4"/><circle cx="18" cy="14" r="5"/>
-<circle cx="30" cy="21" r="4"/><circle cx="40" cy="9" r="5.5"/><circle cx="35" cy="37" r="4"/></g>
-<g fill="#fff"><circle cx="8" cy="33" r="1.1"/><circle cx="18" cy="14" r="1.5"/><circle cx="30" cy="21" r="1.2"/>
-<circle cx="40" cy="9" r="1.7"/><circle cx="35" cy="37" r="1.2"/></g></svg>"""
-LOGO_SVG = svg_img(_LOGO_SVG, 44, 44, "cx-logo")
+<g stroke="#7f838d" stroke-width="1.5" fill="none" stroke-linecap="round">
+<path d="M8 33 L18 14 L30 21 L40 9"/><path d="M30 21 L35 37"/></g>
+<g fill="#ececef"><circle cx="8" cy="33" r="3"/><circle cx="18" cy="14" r="3.5"/>
+<circle cx="30" cy="21" r="3"/><circle cx="35" cy="37" r="3"/></g>
+<circle cx="40" cy="9" r="4" fill="#9d8ff8"/></svg>"""
+LOGO_SVG = svg_img(_LOGO_SVG, 30, 30, "cx-logo")
 
 
 def load_css() -> str:
@@ -124,21 +120,21 @@ def callout(text: str, kind: str = "info", icon_name: Optional[str] = None) -> s
 def empty_state(title: str, body: str, art: str = "stars") -> str:
     arts = {
         "stars": """<svg viewBox="0 0 120 80" width="120" height="80" aria-hidden="true">
-<g stroke="#8b7cff" stroke-opacity=".35" fill="none"><path d="M18 58 L44 26 L72 42 L100 18"/>
-<path d="M72 42 L88 66" stroke-dasharray="3 4"/></g><g fill="#c9c1ff">
+<g stroke="#33363e" fill="none"><path d="M18 58 L44 26 L72 42 L100 18"/>
+<path d="M72 42 L88 66" stroke-dasharray="3 4"/></g><g fill="#7f838d">
 <circle cx="18" cy="58" r="3"/><circle cx="44" cy="26" r="4"/><circle cx="72" cy="42" r="3"/>
-<circle cx="100" cy="18" r="4.5"/></g><circle cx="88" cy="66" r="3" fill="none" stroke="#5ee6ff"
-stroke-opacity=".7" stroke-dasharray="2 2"/></svg>""",
+<circle cx="100" cy="18" r="4.5"/></g><circle cx="88" cy="66" r="3" fill="none" stroke="#9d8ff8"
+stroke-opacity="1" stroke-dasharray="2 2"/></svg>""",
         "vault": """<svg viewBox="0 0 120 80" width="120" height="80" aria-hidden="true">
-<rect x="30" y="20" width="60" height="44" rx="8" fill="none" stroke="#8b7cff" stroke-opacity=".5"/>
-<path d="M30 30 h22 l6 -8 h32" fill="none" stroke="#8b7cff" stroke-opacity=".5"/>
-<g fill="#c9c1ff"><circle cx="48" cy="46" r="2.5"/><circle cx="62" cy="40" r="3"/><circle cx="74" cy="50" r="2.5"/></g>
-<path d="M48 46 L62 40 L74 50" stroke="#5ee6ff" stroke-opacity=".6" fill="none"/></svg>""",
+<rect x="30" y="20" width="60" height="44" rx="8" fill="none" stroke="#4a4d56"/>
+<path d="M30 30 h22 l6 -8 h32" fill="none" stroke="#4a4d56"/>
+<g fill="#7f838d"><circle cx="48" cy="46" r="2.5"/><circle cx="62" cy="40" r="3"/><circle cx="74" cy="50" r="2.5"/></g>
+<path d="M48 46 L62 40 L74 50" stroke="#9d8ff8" fill="none"/></svg>""",
         "archive": """<svg viewBox="0 0 120 80" width="120" height="80" aria-hidden="true">
-<rect x="32" y="18" width="56" height="14" rx="4" fill="none" stroke="#8b7cff" stroke-opacity=".55"/>
-<path d="M36 32 v26 a5 5 0 0 0 5 5 h38 a5 5 0 0 0 5 -5 v-26" fill="none" stroke="#8b7cff" stroke-opacity=".55"/>
-<path d="M52 42 h16" stroke="#5ee6ff" stroke-opacity=".7" stroke-linecap="round"/>
-<circle cx="96" cy="16" r="2" fill="#c9c1ff"/><circle cx="22" cy="60" r="1.6" fill="#c9c1ff"/></svg>""",
+<rect x="32" y="18" width="56" height="14" rx="4" fill="none" stroke="#4a4d56"/>
+<path d="M36 32 v26 a5 5 0 0 0 5 5 h38 a5 5 0 0 0 5 -5 v-26" fill="none" stroke="#4a4d56"/>
+<path d="M52 42 h16" stroke="#9d8ff8" stroke-linecap="round"/>
+<circle cx="96" cy="16" r="2" fill="#7f838d"/><circle cx="22" cy="60" r="1.6" fill="#7f838d"/></svg>""",
     }
     return (f'<div class="cx-empty">{svg_img(arts.get(art, arts["stars"]), 120, 80)}<div class="cx-empty-title">{escape(title)}</div>'
             f'<div class="cx-empty-body">{escape(body)}</div></div>')

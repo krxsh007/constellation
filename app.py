@@ -228,7 +228,7 @@ def render_launch(can_run: bool) -> bool:
     """The run card. Returns True when the run button was clicked."""
     opts = st.session_state["opts"]
     with st.container(key="card_launch"):
-        st.html(ui.card_header("Launch", "Seven stages, from reading to report.", "sparkles"))
+        st.html(ui.card_header("Launch", "Seven stages, from reading to report.", "play"))
         if opts["dry_run"]:
             mode = ('<div class="cx-mode cx-mode--preview"><span class="cx-card-icon">'
                     f'{ui.icon("shield", 15)}</span><div><b>Preview mode</b>'
@@ -248,7 +248,7 @@ def render_launch(can_run: bool) -> bool:
         st.html(f'{mode}<ul class="cx-checklist">{items}</ul>')
         label = "Run preview" if opts["dry_run"] else "Run Constellation"
         clicked = st.button(label, type="primary", disabled=not can_run, width="stretch",
-                            key="run_btn", icon=":material/auto_awesome:")
+                            key="run_btn", icon=":material/play_arrow:")
         st.caption("Only Constellation's own Tags and Related Links sections are rewritten. "
                    "Backups are listed under History & Undo.")
     return clicked
@@ -395,7 +395,14 @@ def table_with_downloads(rows: list, name: str) -> None:
     c_json.download_button("JSON", json.dumps(shown, indent=2, default=str), f"{name}.json",
                            "application/json", key=f"{name}_json", icon=":material/download:", width="stretch")
     st.html(f'<div class="cx-rowcount"><b>{len(shown)}</b> of {len(rows)} rows</div>')
-    st.dataframe(shown, width="stretch", hide_index=True, column_config=TABLE_COLUMNS.get(name),
+    config = dict(TABLE_COLUMNS.get(name) or {})
+    if name == "links":
+        # Scores are similarity plus a bonus per extra supporting concept pair,
+        # so they can exceed 1 -- scale the bar to the data, not to 0..1.
+        top = max((float(r.get("Score") or 0) for r in rows), default=1.0)
+        config["Score"] = st.column_config.ProgressColumn("Score", min_value=0.0, max_value=max(1.0, top),
+                                                          format="%.2f", width=110)
+    st.dataframe(shown, width="stretch", hide_index=True, column_config=config,
                  height=min(38 + 35 * max(len(shown), 1), 520))
 
 

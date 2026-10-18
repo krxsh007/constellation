@@ -1,21 +1,21 @@
 [theme]
 base = "dark"
-primaryColor = "#8b7cff"
-backgroundColor = "#0a0d1a"
-secondaryBackgroundColor = "#121729"
-textColor = "#e6e8f2"
-linkColor = "#5ee6ff"
-borderColor = "#232a44"
-codeBackgroundColor = "#070a15"
-dataframeHeaderBackgroundColor = "#121729"
+primaryColor = "#6b5be6"
+backgroundColor = "#0d0e11"
+secondaryBackgroundColor = "#15161a"
+textColor = "#ececef"
+linkColor = "#9d8ff8"
+borderColor = "#25272d"
+codeBackgroundColor = "#111216"
+dataframeHeaderBackgroundColor = "#15161a"
 font = "Inter, sans-serif"
 codeFont = "'JetBrains Mono', monospace"
-baseRadius = "10px"
+baseRadius = "7px"
 showWidgetBorder = true
 
 [theme.sidebar]
-backgroundColor = "#0d1122"
-secondaryBackgroundColor = "#151b31"
+backgroundColor = "#101114"
+secondaryBackgroundColor = "#15161a"
 
 [client]
 toolbarMode = "minimal"
