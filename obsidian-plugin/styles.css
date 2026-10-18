@@ -1,0 +1,291 @@
+/* Constellation — uses Obsidian CSS variables only, so it follows the user's theme. */
+
+.constellation-view {
+	padding: var(--size-4-3);
+	font-size: var(--font-ui-small);
+}
+
+.constellation-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-3);
+}
+
+.constellation-actions button {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-4-1);
+	font-size: var(--font-ui-small);
+}
+
+.constellation-btn-icon {
+	display: inline-flex;
+}
+
+.constellation-btn-icon svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
+.constellation-heading {
+	margin: var(--size-4-4) 0 var(--size-4-2);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+}
+
+.constellation-stages {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.constellation-stage {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--size-4-2);
+	padding: var(--size-2-2) 0;
+	color: var(--text-faint);
+}
+
+.constellation-stage.is-running,
+.constellation-stage.is-done {
+	color: var(--text-normal);
+}
+
+.constellation-stage-icon {
+	display: inline-flex;
+	flex-shrink: 0;
+	margin-top: 1px;
+}
+
+.constellation-stage-icon svg {
+	width: var(--icon-s);
+	height: var(--icon-s);
+}
+
+.constellation-stage.is-done .constellation-stage-icon {
+	color: var(--color-green);
+}
+
+.constellation-stage.is-running .constellation-stage-icon {
+	color: var(--interactive-accent);
+	animation: constellation-spin 1.2s linear infinite;
+}
+
+.constellation-stage.is-error .constellation-stage-icon {
+	color: var(--text-error);
+}
+
+.constellation-stage-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.constellation-stage-detail {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.constellation-progress {
+	height: 3px;
+	margin-top: var(--size-2-1);
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-border);
+	overflow: hidden;
+}
+
+.constellation-progress-fill {
+	height: 100%;
+	background: var(--interactive-accent);
+	transition: width 0.2s ease;
+}
+
+@keyframes constellation-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.constellation-stats {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: var(--size-4-2);
+	margin-bottom: var(--size-4-2);
+}
+
+.constellation-stat {
+	padding: var(--size-4-2);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+}
+
+.constellation-stat-value {
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+
+.constellation-stat-label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.constellation-muted {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.constellation-warning {
+	margin-top: var(--size-4-2);
+	padding: var(--size-4-2);
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-error);
+	color: var(--text-on-accent);
+	font-size: var(--font-ui-smaller);
+}
+
+.constellation-related-item {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--size-4-2);
+	padding: var(--size-4-1) var(--size-2-2);
+	border-radius: var(--radius-s);
+}
+
+.constellation-related-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.constellation-related-icon {
+	display: inline-flex;
+	color: var(--text-faint);
+	margin-top: 2px;
+}
+
+.constellation-related-icon svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
+.constellation-related-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.constellation-related-name {
+	color: var(--text-accent);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.constellation-related-name:hover {
+	text-decoration: underline;
+}
+
+.constellation-related-evidence {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.constellation-related-score {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+}
+
+.constellation-status.is-running {
+	color: var(--text-accent);
+}
+
+.constellation-secret {
+	-webkit-text-security: disc;
+}
+
+/* Preview modal */
+
+.constellation-preview-modal {
+	width: min(900px, 90vw);
+}
+
+.constellation-preview-summary {
+	margin-bottom: var(--size-4-3);
+	color: var(--text-muted);
+}
+
+.constellation-preview-list {
+	max-height: 60vh;
+	overflow: auto;
+}
+
+.constellation-diff {
+	margin-bottom: var(--size-4-2);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+}
+
+.constellation-diff > summary {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--size-4-3);
+	padding: var(--size-4-2) var(--size-4-3);
+	cursor: pointer;
+	background: var(--background-secondary);
+	border-radius: var(--radius-m);
+}
+
+.constellation-diff-path {
+	font-weight: var(--font-semibold);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.constellation-diff-meta {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	flex-shrink: 0;
+}
+
+.constellation-diff-body {
+	margin: 0;
+	padding: var(--size-4-2) 0;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	white-space: pre-wrap;
+	word-break: break-word;
+	user-select: text;
+}
+
+.constellation-diff-line {
+	padding: 0 var(--size-4-3);
+}
+
+.constellation-diff-line.is-added {
+	background: rgba(var(--color-green-rgb), 0.15);
+	color: var(--text-normal);
+}
+
+.constellation-diff-line.is-removed {
+	background: rgba(var(--color-red-rgb), 0.15);
+	color: var(--text-muted);
+}
+
+.constellation-diff-line.is-context {
+	color: var(--text-muted);
+}
+
+.constellation-diff-gap {
+	padding: 0 var(--size-4-3);
+	color: var(--text-faint);
+}
+
+.constellation-diff-fm {
+	padding: var(--size-4-2) var(--size-4-3);
+	border-top: 1px solid var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}

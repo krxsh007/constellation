@@ -1,0 +1,687 @@
+{
+  "strip": [
+    {
+      "input": "# A\n\nBody text.",
+      "output": "# A\n\nBody text."
+    },
+    {
+      "input": "# A\n\nBody.\n\n## Tags\n#x #y\n\n## Related Links\n- [[B]]\n- [[C]]\n",
+      "output": "# A\n\nBody."
+    },
+    {
+      "input": "# A\n\nBody.\n\n## Tags\n#x #y\n\nMore thoughts.\n",
+      "output": "# A\n\nBody.\n\nMore thoughts."
+    },
+    {
+      "input": "# A\n\nBody.\n\n## Related Links\n- [[B]]\n\n## My Notes\nhello\n",
+      "output": "# A\n\nBody.\n\n## My Notes\nhello"
+    },
+    {
+      "input": "# A\n\n## Related Links\n- [[B]]\n- a manual todo\n",
+      "output": "# A\n\n- a manual todo"
+    },
+    {
+      "input": "# A\n\nBody.\n\n## Tags\n#x\nMore.\n",
+      "output": "# A\n\nBody.\n\nMore."
+    },
+    {
+      "input": "# A\n\n```py\n# not a tag\n```\n\n## Tags\n#x\n",
+      "output": "# A\n\n```py\n# not a tag\n```"
+    },
+    {
+      "input": "# A\n\nBody.\n\n## Related Links\n- [[B]] — Core runtime platform\n- [[C]] - Secondary service\n",
+      "output": "# A\n\nBody."
+    },
+    {
+      "input": "## Tags\n#x\n",
+      "output": ""
+    },
+    {
+      "input": "",
+      "output": ""
+    },
+    {
+      "input": "---\ntags: [a]\n---\n# A\n\n## Related Links\n- [[Folder/B|B]]\n- [[C]]: why\n\n\n",
+      "output": "---\ntags: [a]\n---\n# A"
+    },
+    {
+      "input": "# A\r\n\r\nBody\r\n\r\n## Tags\r\n#x #y\r\n",
+      "output": "# A\n\nBody"
+    },
+    {
+      "input": "## Related Links\n```\n- [[inside fence]]\n```\n- [[after]]\n",
+      "output": "```\n- [[inside fence]]\n```\n- [[after]]"
+    },
+    {
+      "input": "Text\n## Tags\n#a #b\n## Related Links\n- [[X]]\n  \n- [[Y]]\ntrailing user line\n\n",
+      "output": "Text\n\ntrailing user line"
+    },
+    {
+      "input": "# A\n\n## Tags\n#a ##b\n\n## Related Links\n-[[NoSpace]]\n",
+      "output": "# A\n\n#a ##b"
+    }
+  ],
+  "render": [
+    {
+      "base": "# A\n\nBody.",
+      "tags": [
+        "#x",
+        "#y"
+      ],
+      "targets": [
+        {
+          "target": "B",
+          "evidence": "",
+          "score": 0.0
+        }
+      ],
+      "max": 5,
+      "annotate": false,
+      "output": "# A\n\nBody.\n\n## Tags\n#x #y\n\n## Related Links\n- [[B]]\n"
+    },
+    {
+      "base": "",
+      "tags": [
+        "#tag"
+      ],
+      "targets": [],
+      "max": 5,
+      "annotate": false,
+      "output": "## Tags\n#tag\n"
+    },
+    {
+      "base": "",
+      "tags": [],
+      "targets": [],
+      "max": 5,
+      "annotate": false,
+      "output": ""
+    },
+    {
+      "base": "# Root\n\n\n",
+      "tags": null,
+      "targets": [
+        {
+          "target": "E",
+          "evidence": "ev E",
+          "score": 0.9
+        },
+        {
+          "target": "A",
+          "evidence": "ev A",
+          "score": 0.1
+        },
+        {
+          "target": "C",
+          "evidence": "ev C",
+          "score": 0.5
+        },
+        {
+          "target": "B",
+          "evidence": "ev B",
+          "score": 0.5
+        },
+        {
+          "target": "D",
+          "evidence": "ev D",
+          "score": 0.7
+        },
+        {
+          "target": "A",
+          "evidence": "ev A",
+          "score": 0.3
+        }
+      ],
+      "max": 3,
+      "annotate": true,
+      "output": "# Root\n\n## Related Links\n- [[B]] — ev B\n- [[D]] — ev D\n- [[E]] — ev E\n"
+    },
+    {
+      "base": "# Root",
+      "tags": [
+        "#t"
+      ],
+      "targets": [
+        {
+          "target": "Docker",
+          "evidence": "Platform\nfor containers",
+          "score": 0.2
+        },
+        {
+          "target": "Kubernetes",
+          "evidence": "",
+          "score": 0.4
+        }
+      ],
+      "max": 0,
+      "annotate": true,
+      "output": "# Root\n\n## Tags\n#t\n\n## Related Links\n- [[Docker]] — Platform for containers\n- [[Kubernetes]]\n"
+    }
+  ],
+  "tags": {
+    "input": [
+      "#machine-learning",
+      "deep learning",
+      "#AI,",
+      "PYTHON!",
+      "#tech/web",
+      "",
+      "##double",
+      "  spaced  out  "
+    ],
+    "output": [
+      "#machine-learning",
+      "#deep-learning",
+      "#ai",
+      "#python",
+      "#tech/web",
+      "#double",
+      "#spaced-out"
+    ]
+  },
+  "effective": [
+    {
+      "links": [
+        {
+          "from_note": "a.md",
+          "to_note": "b.md",
+          "evidence": "ab",
+          "score": 0.8
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "c.md",
+          "evidence": "",
+          "score": 0.6
+        },
+        {
+          "from_note": "c.md",
+          "to_note": "a.md",
+          "evidence": "ca",
+          "score": 0.9
+        },
+        {
+          "from_note": "b.md",
+          "to_note": "d.md",
+          "evidence": "bd",
+          "score": 0.1
+        },
+        {
+          "from_note": "d.md",
+          "to_note": "d.md",
+          "evidence": "self",
+          "score": 1.0
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "e.md",
+          "evidence": "ae",
+          "score": 0.6
+        }
+      ],
+      "backlinks": false,
+      "max": 0,
+      "output": {
+        "a.md": [
+          {
+            "target": "b.md",
+            "evidence": "ab",
+            "score": 0.8
+          },
+          {
+            "target": "c.md",
+            "evidence": "",
+            "score": 0.6
+          },
+          {
+            "target": "e.md",
+            "evidence": "ae",
+            "score": 0.6
+          }
+        ],
+        "c.md": [
+          {
+            "target": "a.md",
+            "evidence": "ca",
+            "score": 0.9
+          }
+        ],
+        "b.md": [
+          {
+            "target": "d.md",
+            "evidence": "bd",
+            "score": 0.1
+          }
+        ]
+      }
+    },
+    {
+      "links": [
+        {
+          "from_note": "a.md",
+          "to_note": "b.md",
+          "evidence": "ab",
+          "score": 0.8
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "c.md",
+          "evidence": "",
+          "score": 0.6
+        },
+        {
+          "from_note": "c.md",
+          "to_note": "a.md",
+          "evidence": "ca",
+          "score": 0.9
+        },
+        {
+          "from_note": "b.md",
+          "to_note": "d.md",
+          "evidence": "bd",
+          "score": 0.1
+        },
+        {
+          "from_note": "d.md",
+          "to_note": "d.md",
+          "evidence": "self",
+          "score": 1.0
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "e.md",
+          "evidence": "ae",
+          "score": 0.6
+        }
+      ],
+      "backlinks": false,
+      "max": 1,
+      "output": {
+        "a.md": [
+          {
+            "target": "b.md",
+            "evidence": "ab",
+            "score": 0.8
+          }
+        ],
+        "c.md": [
+          {
+            "target": "a.md",
+            "evidence": "ca",
+            "score": 0.9
+          }
+        ],
+        "b.md": [
+          {
+            "target": "d.md",
+            "evidence": "bd",
+            "score": 0.1
+          }
+        ]
+      }
+    },
+    {
+      "links": [
+        {
+          "from_note": "a.md",
+          "to_note": "b.md",
+          "evidence": "ab",
+          "score": 0.8
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "c.md",
+          "evidence": "",
+          "score": 0.6
+        },
+        {
+          "from_note": "c.md",
+          "to_note": "a.md",
+          "evidence": "ca",
+          "score": 0.9
+        },
+        {
+          "from_note": "b.md",
+          "to_note": "d.md",
+          "evidence": "bd",
+          "score": 0.1
+        },
+        {
+          "from_note": "d.md",
+          "to_note": "d.md",
+          "evidence": "self",
+          "score": 1.0
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "e.md",
+          "evidence": "ae",
+          "score": 0.6
+        }
+      ],
+      "backlinks": false,
+      "max": 2,
+      "output": {
+        "a.md": [
+          {
+            "target": "b.md",
+            "evidence": "ab",
+            "score": 0.8
+          },
+          {
+            "target": "c.md",
+            "evidence": "",
+            "score": 0.6
+          }
+        ],
+        "c.md": [
+          {
+            "target": "a.md",
+            "evidence": "ca",
+            "score": 0.9
+          }
+        ],
+        "b.md": [
+          {
+            "target": "d.md",
+            "evidence": "bd",
+            "score": 0.1
+          }
+        ]
+      }
+    },
+    {
+      "links": [
+        {
+          "from_note": "a.md",
+          "to_note": "b.md",
+          "evidence": "ab",
+          "score": 0.8
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "c.md",
+          "evidence": "",
+          "score": 0.6
+        },
+        {
+          "from_note": "c.md",
+          "to_note": "a.md",
+          "evidence": "ca",
+          "score": 0.9
+        },
+        {
+          "from_note": "b.md",
+          "to_note": "d.md",
+          "evidence": "bd",
+          "score": 0.1
+        },
+        {
+          "from_note": "d.md",
+          "to_note": "d.md",
+          "evidence": "self",
+          "score": 1.0
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "e.md",
+          "evidence": "ae",
+          "score": 0.6
+        }
+      ],
+      "backlinks": true,
+      "max": 0,
+      "output": {
+        "a.md": [
+          {
+            "target": "b.md",
+            "evidence": "ab",
+            "score": 0.8
+          },
+          {
+            "target": "c.md",
+            "evidence": "ca",
+            "score": 0.9
+          },
+          {
+            "target": "e.md",
+            "evidence": "ae",
+            "score": 0.6
+          }
+        ],
+        "b.md": [
+          {
+            "target": "a.md",
+            "evidence": "ab",
+            "score": 0.8
+          },
+          {
+            "target": "d.md",
+            "evidence": "bd",
+            "score": 0.1
+          }
+        ],
+        "c.md": [
+          {
+            "target": "a.md",
+            "evidence": "ca",
+            "score": 0.9
+          }
+        ],
+        "d.md": [
+          {
+            "target": "b.md",
+            "evidence": "bd",
+            "score": 0.1
+          }
+        ],
+        "e.md": [
+          {
+            "target": "a.md",
+            "evidence": "ae",
+            "score": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "links": [
+        {
+          "from_note": "a.md",
+          "to_note": "b.md",
+          "evidence": "ab",
+          "score": 0.8
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "c.md",
+          "evidence": "",
+          "score": 0.6
+        },
+        {
+          "from_note": "c.md",
+          "to_note": "a.md",
+          "evidence": "ca",
+          "score": 0.9
+        },
+        {
+          "from_note": "b.md",
+          "to_note": "d.md",
+          "evidence": "bd",
+          "score": 0.1
+        },
+        {
+          "from_note": "d.md",
+          "to_note": "d.md",
+          "evidence": "self",
+          "score": 1.0
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "e.md",
+          "evidence": "ae",
+          "score": 0.6
+        }
+      ],
+      "backlinks": true,
+      "max": 1,
+      "output": {
+        "a.md": [
+          {
+            "target": "c.md",
+            "evidence": "ca",
+            "score": 0.9
+          }
+        ],
+        "b.md": [
+          {
+            "target": "a.md",
+            "evidence": "ab",
+            "score": 0.8
+          }
+        ],
+        "c.md": [
+          {
+            "target": "a.md",
+            "evidence": "ca",
+            "score": 0.9
+          }
+        ],
+        "d.md": [
+          {
+            "target": "b.md",
+            "evidence": "bd",
+            "score": 0.1
+          }
+        ],
+        "e.md": [
+          {
+            "target": "a.md",
+            "evidence": "ae",
+            "score": 0.6
+          }
+        ]
+      }
+    },
+    {
+      "links": [
+        {
+          "from_note": "a.md",
+          "to_note": "b.md",
+          "evidence": "ab",
+          "score": 0.8
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "c.md",
+          "evidence": "",
+          "score": 0.6
+        },
+        {
+          "from_note": "c.md",
+          "to_note": "a.md",
+          "evidence": "ca",
+          "score": 0.9
+        },
+        {
+          "from_note": "b.md",
+          "to_note": "d.md",
+          "evidence": "bd",
+          "score": 0.1
+        },
+        {
+          "from_note": "d.md",
+          "to_note": "d.md",
+          "evidence": "self",
+          "score": 1.0
+        },
+        {
+          "from_note": "a.md",
+          "to_note": "e.md",
+          "evidence": "ae",
+          "score": 0.6
+        }
+      ],
+      "backlinks": true,
+      "max": 2,
+      "output": {
+        "a.md": [
+          {
+            "target": "b.md",
+            "evidence": "ab",
+            "score": 0.8
+          },
+          {
+            "target": "c.md",
+            "evidence": "ca",
+            "score": 0.9
+          }
+        ],
+        "b.md": [
+          {
+            "target": "a.md",
+            "evidence": "ab",
+            "score": 0.8
+          },
+          {
+            "target": "d.md",
+            "evidence": "bd",
+            "score": 0.1
+          }
+        ],
+        "c.md": [
+          {
+            "target": "a.md",
+            "evidence": "ca",
+            "score": 0.9
+          }
+        ],
+        "d.md": [
+          {
+            "target": "b.md",
+            "evidence": "bd",
+            "score": 0.1
+          }
+        ],
+        "e.md": [
+          {
+            "target": "a.md",
+            "evidence": "ae",
+            "score": 0.6
+          }
+        ]
+      }
+    }
+  ],
+  "repair": [
+    {
+      "input": "{\"links\": [{\"source\": \"Docker\", \"target\": \"Kubernetes\", \"relationship\": \"uses\", \"evidence\": \"K8s schedules containers.\", \"from_note\": \"a.md\", \"to_note\": \"b.md\"}, {\"source\": \"Redis\", \"target\": \"Post",
+      "output": "{\"links\": [{\"source\": \"Docker\", \"target\": \"Kubernetes\", \"relationship\": \"uses\", \"evidence\": \"K8s schedules containers.\", \"from_note\": \"a.md\", \"to_note\": \"b.md\"}, {\"source\": \"Redis\", \"target\": \"Post\"}]}",
+      "sources": [
+        "Docker"
+      ]
+    },
+    {
+      "input": "{\"links\": [{\"source\": \"Docker\", \"target\": \"Kubernetes\", \"relationship\": \"uses\", \"evidence\": \"a very long ev\", \"from_note\": \"a.md\", \"to_no",
+      "output": "{\"links\": [{\"source\": \"Docker\", \"target\": \"Kubernetes\", \"relationship\": \"uses\", \"evidence\": \"a very long ev\", \"from_note\": \"a.md\"}]}",
+      "sources": []
+    },
+    {
+      "input": "{\"links\": [{\"source\": \"Docker\", \"target\": \"Kubernetes\", \"relationship\": \"uses\", \"evidence\": \"he said \\\\\\\"hi\\\\\\\" then left\", \"from_note\": \"a.md\", \"to_note\": \"b.md\"}]}",
+      "output": "{\"links\": [{\"source\": \"Docker\", \"target\": \"Kubernetes\", \"relationship\": \"uses\", \"evidence\": \"he said \\\\\\\"hi\\\\\\\" then left\", \"from_note\": \"a.md\", \"to_note\": \"b.md\"}]}",
+      "sources": [
+        "Docker"
+      ]
+    },
+    {
+      "input": "{\"links\": [{\"source\": \"A\", \"target\": \"B\", \"relationship\": \"uses\", \"evidence\": \"x\", \"from_note\": \"a\", \"to_note\": ",
+      "output": "{\"links\": [{\"source\": \"A\", \"target\": \"B\", \"relationship\": \"uses\", \"evidence\": \"x\", \"from_note\": \"a\"}]}",
+      "sources": []
+    },
+    {
+      "input": "{\"concepts\": [{\"concept_name\": \"X\", \"tags\": [\"a\", \"b\"",
+      "output": "{\"concepts\": [{\"concept_name\": \"X\", \"tags\": [\"a\", \"b\"]}]}",
+      "sources": null
+    }
+  ]
+}
