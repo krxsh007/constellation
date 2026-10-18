@@ -11,13 +11,13 @@ python3 eval/run_eval.py --replay --write
 
 ## Setup
 
-- **Vault** (`eval/vault/`): 51 synthetic notes across five topics (machine
+- **Vault** (`eval/data/vault/`): 51 synthetic notes across five topics (machine
   learning, distributed systems, cooking, ancient/modern history, gardening).
   It includes near-miss distractors that share vocabulary across topics but are
   unrelated: *Neural Network Pruning* vs *Pruning Fruit Trees*, *Byzantine Fault
   Tolerance* vs *Byzantine Empire*, *CAP Theorem and Network Partitions* vs
   *Partition of India*, *Batch Normalization* vs *Batch Cooking*, and others.
-- **Gold** (`eval/gold_links.json`): undirected pairs labelled by reading the
+- **Gold** (`eval/data/gold_links.json`): undirected pairs labelled by reading the
   notes, before any pipeline run. There are 35 **required** pairs and 35 **optional**
   pairs (defensible but debatable). An optional pair the pipeline predicts is neither
   rewarded nor penalised, and optional pairs are left out of recall. The file also

@@ -46,3 +46,7 @@ dist/
 .linker_report.json
 .linker.lock
 .constellation_backups/
+
+# Test coverage data
+.coverage
+coverage.xml

@@ -20,7 +20,6 @@
   "pairs": 62,
   "precision": 0.7674,
   "recall": 0.9429,
-  "replay_wall_s": 0.1,
   "tags": 184,
   "tp": 33
  },
@@ -45,7 +44,6 @@
   "pairs": 59,
   "precision": 0.7111,
   "recall": 0.9143,
-  "replay_wall_s": 0.09,
   "tags": 184,
   "tp": 32
  },
@@ -70,7 +68,6 @@
   "pairs": 75,
   "precision": 0.6667,
   "recall": 0.9714,
-  "replay_wall_s": 0.09,
   "tags": 184,
   "tp": 34
  },
@@ -95,7 +92,6 @@
   "pairs": 55,
   "precision": 0.8158,
   "recall": 0.8857,
-  "replay_wall_s": 0.09,
   "tags": 184,
   "tp": 31
  },
@@ -120,7 +116,6 @@
   "pairs": 61,
   "precision": 0.8205,
   "recall": 0.9143,
-  "replay_wall_s": 0.1,
   "tags": 184,
   "tp": 32
  },
@@ -145,7 +140,6 @@
   "pairs": 60,
   "precision": 0.8049,
   "recall": 0.9429,
-  "replay_wall_s": 0.09,
   "tags": 184,
   "tp": 33
  },
@@ -170,7 +164,6 @@
   "pairs": 62,
   "precision": 0.7674,
   "recall": 0.9429,
-  "replay_wall_s": 0.09,
   "tags": 184,
   "tp": 33
  },
@@ -195,7 +188,6 @@
   "pairs": 144,
   "precision": 0.3097,
   "recall": 1.0,
-  "replay_wall_s": 0.09,
   "tags": 184,
   "tp": 35
  },
@@ -220,7 +212,6 @@
   "pairs": 72,
   "precision": 0.6327,
   "recall": 0.8857,
-  "replay_wall_s": 0.09,
   "tags": 184,
   "tp": 31
  }

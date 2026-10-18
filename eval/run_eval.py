@@ -1,8 +1,8 @@
 """Link-quality evaluation and stage ablations for the Constellation pipeline.
 
 Runs the real LangGraph pipeline in dry-run mode on a temporary copy of
-``eval/vault`` once per configuration, compares the links it would write with
-the hand-labelled pairs in ``eval/gold_links.json`` and reports precision,
+``eval/data/vault`` once per configuration, compares the links it would write with
+the hand-labelled pairs in ``eval/data/gold_links.json`` and reports precision,
 recall, F1, tag counts, LLM calls, tokens, time and estimated cost.
 
 Every LLM and embedding response is recorded to a cassette so the evaluation
@@ -13,10 +13,10 @@ can be replayed offline and deterministically:
     python3 eval/run_eval.py --replay --write      # also refresh RESULTS.md
     python3 eval/run_eval.py --replay --check-baseline
 
-Cassettes: ``eval/cassettes/<config>.json`` holds that configuration's LLM
+Cassettes: ``eval/cassettes/llm/<config>.json`` holds that configuration's LLM
 responses (keyed by a hash of prompt, model, schema and inputs, with the token
 usage and latency of the original call). Embedding vectors are stored once, in
-``eval/cassettes/_embeddings.json``, keyed by text -- they are the same across
+``eval/cassettes/embeddings.json``, keyed by text -- they are the same across
 configurations and too large to duplicate. Vectors are stored as float16; the
 pipeline sees the float16 values in record mode too, so record and replay rank
 neighbours identically.
@@ -57,10 +57,11 @@ from constellation.core import log as logmod  # noqa: E402
 from constellation.nodes import io  # noqa: E402
 
 EVAL_DIR = Path(__file__).resolve().parent
-VAULT_DIR = EVAL_DIR / "vault"
-GOLD_PATH = EVAL_DIR / "gold_links.json"
-CASSETTE_DIR = EVAL_DIR / "cassettes"
-EMBEDDINGS_CASSETTE = CASSETTE_DIR / "_embeddings.json"
+DATA_DIR = EVAL_DIR / "data"
+VAULT_DIR = DATA_DIR / "vault"
+GOLD_PATH = DATA_DIR / "gold_links.json"
+CASSETTE_DIR = EVAL_DIR / "cassettes" / "llm"
+EMBEDDINGS_CASSETTE = EVAL_DIR / "cassettes" / "embeddings.json"
 RESULTS_MD = EVAL_DIR / "RESULTS.md"
 RESULTS_JSON = EVAL_DIR / "results.json"
 BASELINE_PATH = EVAL_DIR / "baseline.json"
@@ -153,8 +154,6 @@ def load_llm_pool() -> dict:
     """Every recorded LLM response across all cassettes (record-mode reuse)."""
     pool = {}
     for path in sorted(CASSETTE_DIR.glob("*.json")):
-        if path.name.startswith("_"):
-            continue
         pool.update(_load_json(path, {}).get("llm", {}))
     return pool
 
@@ -541,7 +540,8 @@ def write_results(rows: list, gold: dict) -> None:
     head, _, rest = text.partition(START)
     _, _, tail = rest.partition(END)
     RESULTS_MD.write_text(head + block + tail, encoding="utf-8")
-    _dump_json(RESULTS_JSON, rows)
+    # Replay timing varies run to run; leave it out so an unchanged eval leaves no diff.
+    _dump_json(RESULTS_JSON, [{k: v for k, v in r.items() if k != "replay_wall_s"} for r in rows])
 
 
 def check_baseline(rows: list, tolerance_points: float = 5.0) -> bool:
