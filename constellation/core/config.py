@@ -73,6 +73,38 @@ BACKLINKS = _env_bool("BACKLINKS")
 # pane and Dataview look) instead of a `## Tags` section at the bottom.
 TAGS_IN_FRONTMATTER = _env_bool("TAGS_IN_FRONTMATTER")
 
+# --- Ablation hooks (used by eval/run_eval.py; defaults keep normal behaviour) ---
+# Nearest concepts fetched per concept, and kept per note, when looking for
+# related notes before the relationship LLM call.
+RETRIEVAL_K = int(os.getenv("RETRIEVAL_K", "10"))
+# Use the extractor's concepts/tags as-is instead of a second LLM pass.
+SKIP_CONCEPT_VERIFICATION = _env_bool("SKIP_CONCEPT_VERIFICATION")
+# Keep the relationship extractor's links without the verification LLM pass.
+SKIP_RELATIONSHIP_VERIFICATION = _env_bool("SKIP_RELATIONSHIP_VERIFICATION")
+# "llm" (default) asks the LLM which retrieved notes are related; "retrieval"
+# links notes by embedding similarity alone (a no-LLM baseline).
+_RELATIONSHIP_MODES = ("llm", "retrieval")
+RELATIONSHIP_MODE = os.getenv("RELATIONSHIP_MODE", "llm").strip().lower() or "llm"
+if RELATIONSHIP_MODE not in _RELATIONSHIP_MODES:
+    raise ValueError(f"Unknown RELATIONSHIP_MODE '{RELATIONSHIP_MODE}'. Choose one of: llm, retrieval.")
+
+
+def set_ablation(retrieval_k: int = None, skip_concept_verification: bool = None,
+                 skip_relationship_verification: bool = None, relationship_mode: str = None) -> None:
+    """Sets the ablation hooks. None leaves a setting as is."""
+    global RETRIEVAL_K, SKIP_CONCEPT_VERIFICATION, SKIP_RELATIONSHIP_VERIFICATION, RELATIONSHIP_MODE
+    if retrieval_k is not None:
+        RETRIEVAL_K = max(int(retrieval_k), 1)
+    if skip_concept_verification is not None:
+        SKIP_CONCEPT_VERIFICATION = bool(skip_concept_verification)
+    if skip_relationship_verification is not None:
+        SKIP_RELATIONSHIP_VERIFICATION = bool(skip_relationship_verification)
+    if relationship_mode is not None:
+        if relationship_mode not in _RELATIONSHIP_MODES:
+            raise ValueError(f"Unknown relationship mode '{relationship_mode}'.")
+        RELATIONSHIP_MODE = relationship_mode
+
+
 # --- Providers ---
 # "groq" (hosted) or "ollama" (local) for the LLM; "google" (hosted) or
 # "ollama" (local) for embeddings. With both on ollama, note text never leaves

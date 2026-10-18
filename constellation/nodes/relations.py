@@ -45,7 +45,7 @@ def _retrieve_related(store, concepts_by_note: dict, all_concepts: list):
         for c in note_concepts:
             query = f"{c['concept_name']}: {c['explanation']}"
             try:
-                results = store.similarity_search_with_score(query, k=10)
+                results = store.similarity_search_with_score(query, k=config.RETRIEVAL_K)
             except Exception as e:
                 log(f"  Similarity search failed for '{c['concept_name']}': {str(e)[:160]}")
                 continue
@@ -71,8 +71,8 @@ def _retrieve_related(store, concepts_by_note: dict, all_concepts: list):
                 if match:
                     retrieved_concepts.append(match)
 
-        # Top 10 most similar keeps the prompt compact and within Groq TPM limits.
-        retrieved_concepts = retrieved_concepts[:10]
+        # Top RETRIEVAL_K (default 10) keeps the prompt compact and within Groq TPM limits.
+        retrieved_concepts = retrieved_concepts[:config.RETRIEVAL_K]
 
         if not retrieved_concepts:
             continue
@@ -121,7 +121,12 @@ async def relationship_extractor(state: AgentState):
         )
 
         all_relations = []
-        if inputs_list:
+        if config.RELATIONSHIP_MODE == "retrieval":
+            # Ablation baseline: no LLM, every retrieved note pair is a candidate
+            # link; the per-note cap later keeps the most similar ones.
+            log("Retrieval-only mode: linking notes by embedding similarity alone.")
+            all_relations = retrieval_only_links(pair_similarity)
+        elif inputs_list:
             results = await abatch_invoke_with_retry(
                 prompt_relation, config.LLM_RELATIONSHIP, RelationshipExtractionOutput, inputs_list
             )
@@ -136,6 +141,18 @@ async def relationship_extractor(state: AgentState):
     except Exception as e:
         log(f"Failed to extract cross-note relationships: {e}")
         return {"raw_links": [], "pair_similarity": {}}
+
+
+def retrieval_only_links(pair_similarity: dict) -> list:
+    """One link per retrieved note pair (both directions), scored later from
+    pair_similarity like any other link."""
+    links = []
+    for key in sorted(pair_similarity):
+        a, b = key.split("\x1f")
+        for src, dst in ((a, b), (b, a)):
+            links.append({"source": None, "target": None, "relationship": "similar_to",
+                          "evidence": "", "from_note": src, "to_note": dst})
+    return links
 
 
 def score_links(valid_links: list, supporting_pairs: dict, pair_similarity: dict) -> None:
@@ -213,6 +230,12 @@ async def relationship_verifier(state: AgentState):
         log("No raw links or concepts to verify.")
         return {"links": state.get("links") or [], "new_links": []}
 
+    if config.SKIP_RELATIONSHIP_VERIFICATION or config.RELATIONSHIP_MODE == "retrieval":
+        log("Relationship verification disabled; keeping the extracted links as-is.")
+        valid_links, prevented = filter_and_score_links([dict(l) for l in raw_links], state)
+        log(f"Total cross-note relationships: {len(valid_links)} (rejected {prevented})")
+        return {"links": (state.get("links") or []) + valid_links, "new_links": valid_links}
+
     try:
         # Verify in batches of 10 to stay inside Groq's context/token limits (413).
         batch_size = 10
@@ -230,7 +253,8 @@ async def relationship_verifier(state: AgentState):
                 if link.get("target"):
                     concepts_in_batch.add(link["target"])
 
-            relevant_concepts = [concept_lookup[n] for n in concepts_in_batch if n in concept_lookup]
+            # Sorted so the prompt (and a recorded eval cassette key) is stable across runs.
+            relevant_concepts = [concept_lookup[n] for n in sorted(concepts_in_batch) if n in concept_lookup]
             minified_concepts = minify_concepts(relevant_concepts)
 
             inputs_list.append({

@@ -93,7 +93,18 @@ async def concept_verifier(state: AgentState):
         })
 
     results = []
-    if inputs_list:
+    if inputs_list and config.SKIP_CONCEPT_VERIFICATION:
+        # Ablation: trust the extractor's output and skip the second LLM pass.
+        log("Concept verification disabled; using the extracted concepts as-is.")
+        raw_tags = state.get("raw_tags_by_note") or {}
+        results = [
+            ConceptExtractionOutput.model_validate({
+                "concepts": [c for c in state.get("raw_concepts") or [] if c.get("source_note") == note["title"]],
+                "tags": raw_tags.get(note["title"], []),
+            })
+            for note in notes_with_concepts
+        ]
+    elif inputs_list:
         log(f"Verifying concepts for {len(inputs_list)} notes concurrently...")
         results = await abatch_invoke_with_retry(
             prompt_concept_verification, config.LLM_VERIFICATION, ConceptExtractionOutput, inputs_list
