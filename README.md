@@ -11,6 +11,46 @@ The app, the cache and the vector index all live on your machine. What leaves it
 
 You can also mix the two, e.g. a local LLM with Google embeddings.
 
+## Obsidian plugin
+
+Constellation also ships as a native Obsidian plugin in [`obsidian-plugin/`](obsidian-plugin/), so you never have to leave Obsidian. It is a TypeScript port of the same pipeline with no Python dependency: everything runs inside Obsidian.
+
+**Install manually**
+
+```bash
+cd obsidian-plugin
+npm install
+npm run build
+```
+
+Copy `main.js`, `manifest.json` and `styles.css` into `<your vault>/.obsidian/plugins/constellation/`, then enable **Constellation** under Settings → Community plugins.
+
+**Install with BRAT**: once a GitHub release of this repo has `main.js`, `manifest.json` and `styles.css` attached as assets, add `krxsh007/constellation` in [BRAT](https://github.com/TfTHacker/obsidian42-brat) ("Add beta plugin"). BRAT also reads a `manifest.json` from the repository root, so that file has to exist there for BRAT to find the plugin.
+
+**Using it**
+
+- Ribbon icon (✦) opens the Constellation panel in the right sidebar. It shows the 7 pipeline stages live, stats for the last run, and the related notes of the note you have open (click one to open it).
+- Commands: *Link entire vault*, *Link current note*, *Preview changes* (a diff per note with Apply / Cancel; nothing is written until you apply), *Undo last run*, *Remove all Constellation output*.
+- The status bar shows progress while a run is going.
+- Settings: LLM provider (Groq or Ollama), Groq keys (one per line, rotated on rate limits), models, embedding provider (Gemini or Ollama), max links per note, annotations, backlinks, frontmatter tags, excluded folders, concurrency.
+
+**How it compares to the Python app**
+
+| | Python app | Obsidian plugin |
+|---|---|---|
+| Prompts, two-pass verification, link scoring and cap | same | same |
+| `## Tags` / `## Related Links` rules (only lines the tool wrote are replaced) | `nodes/io.py` | `src/sections.ts`, checked against the Python output by a parity fixture |
+| Vector search | FAISS index in the vault | JSON vector list + cosine similarity in the plugin folder |
+| Change detection | MD5 of the note minus generated sections | Hash of the note *body* minus generated sections (frontmatter edits do not trigger re-extraction) |
+| Writes | temp-file swap, skips notes edited mid-run | `vault.process()` (atomic), skips notes edited mid-run; frontmatter via `processFrontMatter` |
+| Undo | `.constellation_backups/` in the vault | snapshots in the plugin folder |
+
+The two keep separate caches, so running both against the same vault re-extracts each note once per tool. They write the same sections, so either can clean up after the other.
+
+**Where data lives**: API keys and settings are stored in `.obsidian/plugins/constellation/data.json` inside your vault, in plain text. Keep that in mind if you sync or share the vault, and exclude that file from public repos. The cache (`cache.json`), vector index (`index.json`) and undo snapshots (`backups/`) live in the same folder. Note text is sent to Groq and concept summaries to Google unless you choose Ollama for both.
+
+**Development**: `npm run dev` rebuilds on change, `npm test` runs the vitest suite (pure logic plus offline end-to-end runs with a fake vault and fake providers). `python obsidian-plugin/scripts/gen_parity_fixture.py` regenerates the Python parity fixture.
+
 ## Pipeline Graph
 
 ![Constellation Pipeline](assets/graph_visualization.png)
