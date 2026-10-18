@@ -42,6 +42,37 @@ include = ["constellation*"]
 line-length = 120
 target-version = "py311"
 
+[tool.ruff.format]
+# New code is held to `ruff format`. These modules predate the formatter and use
+# hand-aligned hanging indents; they are listed here until they get one
+# dedicated reformat commit, so the reformat doesn't collide with in-flight work.
+exclude = [
+    "app.py",
+    "constellation/core/backup.py",
+    "constellation/core/config.py",
+    "constellation/core/prompts.py",
+    "constellation/core/state.py",
+    "constellation/core/utils.py",
+    "constellation/core/vectorstore.py",
+    "constellation/nodes/concepts.py",
+    "constellation/nodes/io.py",
+    "constellation/nodes/relations.py",
+    "constellation/ui/components.py",
+    "constellation/ui/helpers.py",
+    "main.py",
+    "obsidian-plugin/scripts/gen_parity_fixture.py",
+    "scripts/monitor_keys.py",
+    "scripts/run_local.py",
+    "tests/test_app_smoke.py",
+    "tests/test_e2e.py",
+    "tests/test_features.py",
+    "tests/test_llm_parsing.py",
+    "tests/test_notes.py",
+    "tests/test_pipeline_fixes.py",
+    "tests/test_safety.py",
+    "tests/test_vectorstore.py",
+]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B"]
 # E501: line length is advisory; E741: short comprehension names; B905: zip() strictness is not needed here
@@ -49,3 +80,15 @@ ignore = ["E501", "E741", "B905"]
 
 [tool.ruff.lint.per-file-ignores]
 "app.py" = ["E402"]
+# Standalone fixture generator; its import order is part of the plugin port and left as is.
+"obsidian-plugin/scripts/*.py" = ["I001"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+pythonVersion = "3.11"
+# The codebase uses `x: str = None` for optional arguments throughout.
+strictParameterNoneValue = false
+# Shipped code only: the tests deliberately hand nodes partial state dicts and
+# monkeypatch modules, which is exactly what a type checker objects to.
+include = ["constellation", "main.py", "app.py", "scripts"]
+exclude = ["**/node_modules", "**/__pycache__", "obsidian-plugin", "build", "dist"]

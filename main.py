@@ -47,7 +47,7 @@ graph.add_edge("summary_reporter",       END)
 app = graph.compile()
 
 
-def initial_state(vault_dir: str, dry_run: bool = False) -> dict:
+def initial_state(vault_dir: str, dry_run: bool = False) -> AgentState:
     return {
         "notes": [],
         "new_notes": [],

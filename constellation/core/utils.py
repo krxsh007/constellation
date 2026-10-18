@@ -2,7 +2,7 @@ import asyncio
 import json
 import re
 import time
-from typing import List, get_args
+from typing import Any, List, Optional, get_args
 
 from langchain_groq import ChatGroq
 
@@ -75,7 +75,7 @@ def minify_concepts(concepts: List[dict]) -> List[dict]:
     ]
 
 
-def _truncate_text(text: str, max_chars: int) -> str:
+def _truncate_text(text: Optional[str], max_chars: int) -> str:
     text = (text or "").strip()
     if len(text) <= max_chars:
         return text
@@ -177,7 +177,7 @@ def _create_llm(model_name: str, api_key_index: int = None):
     if effort and _is_reasoning_model(model_name):
         extra["reasoning_effort"] = effort
     return ChatGroq(
-        groq_api_key=_groq_key(index),
+        groq_api_key=_groq_key(index),  # pyright: ignore[reportCallIssue]  (pydantic field name)
         model=model_name,
         max_tokens=config.LLM_MAX_OUTPUT_TOKENS,
         temperature=0,
@@ -663,8 +663,12 @@ async def async_invoke_with_retry(prompt, model_name, pydantic_schema, inputs, m
             await asyncio.sleep(delay)
 
 
-async def abatch_invoke_with_retry(prompt, model_name, pydantic_schema, inputs_list, max_retries=None, base_delay=2.0):
-    """Concurrently invoke multiple inputs using the async retry logic."""
+async def abatch_invoke_with_retry(prompt, model_name, pydantic_schema, inputs_list, max_retries=None,
+                                   base_delay=2.0) -> List[Any]:
+    """Concurrently invoke multiple inputs using the async retry logic.
+
+    Returns one item per input, in order: the parsed `pydantic_schema` instance,
+    or the exception that input raised (callers check isinstance(r, Exception))."""
     concurrency = max(1, config.LLM_CONCURRENCY)
     semaphore = asyncio.Semaphore(concurrency)
 

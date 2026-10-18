@@ -305,7 +305,7 @@ def execute_run(path: str) -> None:
     apply_options()
     dry_run = st.session_state["opts"]["dry_run"]
     lines: list = []
-    current = {"stage": None}
+    current: dict = {"stage": None}
     started = time.time()
 
     with st.status("Starting…", expanded=True) as status:
@@ -467,7 +467,7 @@ def render_previews(preview: dict) -> None:
     pick = c1.selectbox("Note", changed or names, key="preview_pick")
     c2.html(f'<div class="cx-rowcount"><b>{len(changed)}</b> of {len(names)} notes would change</div>')
     entry = preview.get(pick) or {}
-    diff = helpers.note_diff(entry.get("before", ""), entry.get("after", ""), pick)
+    diff = helpers.note_diff(entry.get("before", ""), entry.get("after", ""), pick or "note")
     st.html(ui.diff_html(diff))
 
 

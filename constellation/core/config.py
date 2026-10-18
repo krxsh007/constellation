@@ -183,7 +183,7 @@ def import_ollama():
     """Imports langchain_ollama on demand -- it is only needed in ollama mode, so
     it is an optional dependency rather than a hard one."""
     try:
-        import langchain_ollama
+        import langchain_ollama  # pyright: ignore[reportMissingImports]  (optional extra)
     except ImportError as e:
         raise RuntimeError(
             "The 'ollama' provider needs the langchain-ollama package. "
@@ -241,7 +241,7 @@ class RotatingGoogleEmbeddings(Embeddings):
                 "or paste a key in the sidebar."
             )
         key = GOOGLE_API_KEYS[current_google_key_index]
-        return GoogleGenerativeAIEmbeddings(model=self.model_name, google_api_key=key)
+        return GoogleGenerativeAIEmbeddings(model=self.model_name, google_api_key=key)  # pyright: ignore[reportCallIssue]
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         return _embed_in_batches(
@@ -285,6 +285,7 @@ class RotatingGoogleEmbeddings(Embeddings):
                 delay = base_delay * (2 ** attempt)
                 log(f"  Embedding failed (attempt {attempt + 1}): {str(e)[:160]}. Retrying in {delay:.0f}s...")
                 time.sleep(delay)
+        raise AssertionError("unreachable: the last attempt returns or re-raises")
 
 
 class OllamaEmbeddingsAdapter(Embeddings):
@@ -323,7 +324,7 @@ class ProviderEmbeddings(Embeddings):
         self._ollama = OllamaEmbeddingsAdapter()
 
     @property
-    def active(self) -> Embeddings:
+    def active(self) -> "RotatingGoogleEmbeddings | OllamaEmbeddingsAdapter":
         return self._ollama if EMBEDDING_PROVIDER == "ollama" else self._google
 
     @property
