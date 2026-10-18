@@ -896,4 +896,3 @@ def summary_reporter(state: AgentState):
             log(f"Warning: failed to save run report: {e}")
 
     return {"run_report": report}
-

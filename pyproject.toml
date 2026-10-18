@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ollama = ["langchain-ollama>=1.0,<2"]
-dev = ["ruff", "pytest"]
+dev = ["ruff", "pyright", "pytest", "pytest-cov"]
 
 [project.scripts]
 constellation = "main:cli"
@@ -92,3 +92,13 @@ strictParameterNoneValue = false
 # monkeypatch modules, which is exactly what a type checker objects to.
 include = ["constellation", "main.py", "app.py", "scripts"]
 exclude = ["**/node_modules", "**/__pycache__", "obsidian-plugin", "build", "dist"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["constellation", "main"]
+omit = ["constellation/ui/*.html", "constellation/ui/*.css"]
+
+[tool.coverage.report]
+skip_empty = true

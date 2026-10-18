@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Design notes
+    url: https://github.com/krxsh007/constellation/blob/main/docs/DESIGN.md
+    about: Why the pipeline works the way it does, and known limitations.

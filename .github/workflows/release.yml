@@ -1,0 +1,39 @@
+name: Release
+
+# Builds the Python sdist and wheel for a version tag and attaches them to a
+# GitHub release. Nothing is published to PyPI.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  python-dist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check the tag matches the package version
+        run: |
+          version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match pyproject version ${version}" >&2
+            exit 1
+          fi
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+          ls -l dist
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The plugin release workflow may create the same release first; then
+        # just add the Python files to it.
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes --verify-tag \
+            || gh release upload "$GITHUB_REF_NAME" dist/* --clobber
