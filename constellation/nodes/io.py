@@ -763,7 +763,7 @@ def _write_cache(cache_path, cache_data: dict) -> bool:
         return False
 
 
-def save_checkpoint(state: AgentState, verified_titles) -> None:
+def save_checkpoint(state: dict, verified_titles) -> None:
     """Persists the extraction results right after concept verification.
 
     Extraction is the expensive part of a run; if relationship extraction or
@@ -896,4 +896,3 @@ def summary_reporter(state: AgentState):
             log(f"Warning: failed to save run report: {e}")
 
     return {"run_report": report}
-

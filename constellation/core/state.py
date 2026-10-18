@@ -27,7 +27,9 @@ class RelationshipModel(BaseModel):
 class RelationshipExtractionOutput(BaseModel):
     links: List[RelationshipModel]
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
+    # total=False: nodes read every key with .get() and return partial updates,
+    # and LangGraph merges them; no key is required to be present.
     notes: List[dict]
     new_notes: List[dict]
     raw_concepts: List[dict]

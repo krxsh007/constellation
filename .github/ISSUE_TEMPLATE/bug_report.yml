@@ -1,0 +1,41 @@
+name: Bug report
+description: Something went wrong in the Python app, the CLI or the Obsidian plugin.
+labels: [bug]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      options:
+        - Streamlit app
+        - CLI
+        - Obsidian plugin
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: If you can, reproduce it on the demo vault (`constellation demo`) so no private notes are involved.
+      placeholder: |
+        1. constellation demo --write
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or run report
+      description: The run log (UI → Results → Log, or the CLI output). Remove API keys and note content you don't want to share.
+      render: text
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Constellation 0.2.0, Python 3.12, macOS 15, providers groq + google"

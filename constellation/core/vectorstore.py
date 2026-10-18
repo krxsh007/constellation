@@ -21,7 +21,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, cast
 
 import faiss
 from langchain_community.docstore.in_memory import InMemoryDocstore
@@ -125,7 +125,7 @@ def save_index(store: FAISS, vault_dir: str, embeddings=None) -> None:
     ordered = [store.index_to_docstore_id[pos] for pos in sorted(store.index_to_docstore_id)]
     docs = {}
     for doc_id in ordered:
-        doc = store.docstore.search(doc_id)
+        doc = cast(Document, store.docstore.search(doc_id))
         docs[doc_id] = {"page_content": doc.page_content, "metadata": doc.metadata}
 
     tmp_index = path / (INDEX_FILENAME + ".tmp")
@@ -142,6 +142,11 @@ def save_index(store: FAISS, vault_dir: str, embeddings=None) -> None:
         legacy.unlink()
 
 
+def _stored_docs(store: FAISS) -> dict:
+    """{docstore id: Document}. Indexes built here always use an InMemoryDocstore."""
+    return cast(InMemoryDocstore, store.docstore)._dict
+
+
 def drop_notes(store: Optional[FAISS], titles: Iterable[str]) -> int:
     """Removes every vector whose 'note' metadata is in titles. Returns the count."""
     titles = set(titles)
@@ -149,7 +154,7 @@ def drop_notes(store: Optional[FAISS], titles: Iterable[str]) -> int:
         return 0
     stale_ids = [
         doc_id
-        for doc_id, doc in store.docstore._dict.items()
+        for doc_id, doc in _stored_docs(store).items()
         if doc.metadata.get("note") in titles
     ]
     if stale_ids:
@@ -160,10 +165,10 @@ def drop_notes(store: Optional[FAISS], titles: Iterable[str]) -> int:
 def indexed_notes(store: Optional[FAISS]) -> set:
     if store is None:
         return set()
-    return {doc.metadata.get("note") for doc in store.docstore._dict.values()}
+    return {doc.metadata.get("note") for doc in _stored_docs(store).values()}
 
 
-def add_documents(store: Optional[FAISS], docs: List[Document], embeddings) -> FAISS:
+def add_documents(store: Optional[FAISS], docs: List[Document], embeddings) -> Optional[FAISS]:
     if not docs:
         return store
     if store is None:
@@ -198,4 +203,4 @@ def take_preview_index(vault_dir: str) -> Optional[FAISS]:
 
 
 def count(store: Optional[FAISS]) -> int:
-    return 0 if store is None else len(store.docstore._dict)
+    return 0 if store is None else len(_stored_docs(store))
