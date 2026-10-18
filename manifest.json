@@ -1,0 +1,10 @@
+{
+	"id": "constellation",
+	"name": "Constellation",
+	"version": "0.1.0",
+	"minAppVersion": "1.4.0",
+	"description": "Links your notes by meaning: an LLM extracts concepts, finds genuinely related notes and writes Tags and Related Links sections.",
+	"author": "krxsh007",
+	"authorUrl": "https://github.com/krxsh007",
+	"isDesktopOnly": false
+}
