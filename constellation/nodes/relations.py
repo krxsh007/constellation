@@ -1,5 +1,6 @@
 import asyncio
 import json
+from typing import Optional
 
 from constellation.core import config, vectorstore
 from constellation.core.log import log
@@ -286,7 +287,7 @@ async def relationship_verifier(state: AgentState):
         return {"links": state.get("links") or [], "new_links": []}
 
 
-def _resolve_title(note: str, title_map: dict) -> str:
+def _resolve_title(note: Optional[str], title_map: dict) -> Optional[str]:
     """Resolves a model-supplied note name to a real vault filename, tolerating
     a missing '.md' suffix, wikilink brackets [[...]], quotes, and case differences."""
     if not note:

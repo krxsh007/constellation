@@ -5,7 +5,8 @@ Builds the LangGraph pipeline and exposes two entry points:
     run_pipeline(vault_dir)   -- blocking, returns the final state
     arun_pipeline(vault_dir)  -- the async version
 
-Run ``streamlit run app.py`` for the UI, or ``python main.py`` for the CLI.
+Run ``streamlit run app.py`` for the UI, ``python main.py`` for the CLI, or
+``constellation demo`` for an offline run on the bundled example vault.
 """
 
 import asyncio
@@ -46,7 +47,7 @@ graph.add_edge("summary_reporter",       END)
 app = graph.compile()
 
 
-def initial_state(vault_dir: str, dry_run: bool = False) -> dict:
+def initial_state(vault_dir: str, dry_run: bool = False) -> AgentState:
     return {
         "notes": [],
         "new_notes": [],
@@ -202,6 +203,7 @@ def parse_args(argv=None):
 
     parser = argparse.ArgumentParser(
         description="Constellation: Autonomous Obsidian Knowledge Graph Generator",
+        epilog="Try it without API keys: constellation demo",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -309,12 +311,72 @@ def apply_args_to_config(args) -> None:
         config.set_providers(llm=args.llm_provider, embeddings=args.embedding_provider)
 
 
+def demo_cli(argv=None) -> None:
+    """``constellation demo``: copies the bundled example vault to a temp folder
+    and runs the real pipeline on it with canned LLM/embedding answers, so it
+    needs no API keys and no network."""
+    import argparse
+
+    from constellation import demo
+    from constellation.core import log as logmod
+    from constellation.ui.helpers import note_diff, strip_md
+
+    parser = argparse.ArgumentParser(
+        prog="constellation demo",
+        description="Run Constellation offline on the bundled demo vault (no API keys needed).",
+    )
+    parser.add_argument("--write", action="store_true",
+                        help="Write tags and links into the copied vault instead of only previewing them.")
+    parser.add_argument("--dir", default=None, metavar="PATH",
+                        help="Copy the demo vault here (must be empty) instead of a temp folder.")
+    parser.add_argument("--note", default="Kubernetes.md",
+                        help="Note whose diff to print.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Print the pipeline log.")
+    args = parser.parse_args(argv)
+
+    if not args.verbose:
+        logmod.set_sink(lambda _msg: None)
+    try:
+        vault, state = demo.run_demo(args.dir, dry_run=not args.write)
+    finally:
+        logmod.clear_sink()
+
+    print(f"Demo vault: {vault}")
+    print("Mode: " + ("write (notes in the copy were updated)" if args.write else "preview (nothing written)"))
+    _print_report(state)
+
+    print("\nTags")
+    for note, tags in sorted(state.get("tags_by_note", {}).items()):
+        print(f"  {strip_md(note):<20} {' '.join(tags)}")
+
+    print("\nLinks (score-ranked)")
+    for link in sorted(state.get("links", []), key=lambda l: (l["from_note"], -l.get("score", 0))):
+        print(f"  {strip_md(link['from_note']):<20} -> {strip_md(link['to_note']):<20} "
+              f"{link.get('score', 0):.2f}  {link.get('relationship', '')}")
+
+    preview = state.get("preview") or {}
+    if args.note in preview:
+        entry = preview[args.note]
+        print(f"\nDiff for {args.note}")
+        print(note_diff(entry["before"], entry["after"], args.note))
+    if args.write:
+        print("Open the folder above in Obsidian to explore the links.")
+    else:
+        print("Run `constellation demo --write` to apply the changes to the copy, "
+              "or `streamlit run app.py` and click 'Try the demo vault'.")
+
+
 def cli(argv=None):
     import os
     import sys
 
     from constellation.core.backup import list_backups, restore_backup
     from constellation.nodes.io import reset_vault_state, strip_vault
+
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "demo":
+        demo_cli(argv[1:])
+        return
 
     args = parse_args(argv)
     vault = args.vault_flag or args.vault
@@ -375,4 +437,3 @@ def cli(argv=None):
 
 if __name__ == "__main__":
     cli()
-
