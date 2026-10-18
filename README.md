@@ -82,7 +82,16 @@ Only lines the tool generates (a run of hashtags, `- [[link]]` bullets) are ever
 
 ## Evaluation
 
-Precision and recall of the generated links against a labelled vault, with ablations: see [eval/RESULTS.md](eval/RESULTS.md).
+The links are scored against a hand-labelled 51-note vault that includes near-miss distractors (*Neural Network Pruning* vs *Pruning Fruit Trees*, *Byzantine Fault Tolerance* vs *Byzantine Empire*). Results come from real recorded Groq/Gemini runs, replayed offline:
+
+| Configuration | Precision | Recall | F1 | Est. cost |
+|---|---|---|---|---|
+| Full pipeline | 76.7 | 94.3 | **84.6** | $0.13 |
+| No relationship verification | 66.7 | 97.1 | 79.1 | $0.11 |
+| No concept verification | 71.1 | 91.4 | 80.0 | $0.09 |
+| Embedding similarity only (no relationship LLM) | 31.0 | 100.0 | 47.3 | $0.07 |
+
+The relationship LLM is what makes the links usable, and each verification pass adds 4-6 F1 points. None of the LLM configurations linked any of the 12 distractor pairs. The full ablation table (retrieval k, link cap) and the caveats are in [eval/RESULTS.md](eval/RESULTS.md). To reproduce it offline in about a second, run `python3 eval/run_eval.py --replay`. CI fails if the default F1 drops more than 5 points.
 
 ## Setup
 
