@@ -16,7 +16,7 @@ All notable changes to this project are documented here. The format is based on
 ### Changed
 - `AgentState` is `total=False`, and a few annotations were narrowed so the codebase type-checks cleanly. No behaviour change.
 
-## [0.2.0] - 2026-10-17
+## [0.2.0] - 2026-10-18
 
 ### Added
 - Native Obsidian plugin (`obsidian-plugin/`): a TypeScript port of the pipeline using `requestUrl`, a JSON vector index with cosine search, `vault.process()` writes, a live side panel, preview diffs and undo. Its section-rewriting rules are pinned to the Python behaviour by a parity fixture.

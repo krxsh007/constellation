@@ -2,182 +2,163 @@
 
 [![CI](https://github.com/krxsh007/constellation/actions/workflows/ci.yml/badge.svg)](https://github.com/krxsh007/constellation/actions/workflows/ci.yml)
 
-A local Streamlit app that organizes your Obsidian vault. Point it at a vault folder and it reads your markdown notes, extracts the core concepts with an LLM, then writes Obsidian tags and `[[wikilinks]]` back into the files — turning isolated notes into an interconnected constellation in your graph view.
+**Turns a folder of isolated Obsidian notes into a linked knowledge graph: an LLM pipeline extracts each note's concepts, finds the notes that are genuinely related, and writes tags and `[[wikilinks]]` back into your markdown, safely and incrementally.**
 
-The app, the cache and the vector index all live on your machine. What leaves it depends on the providers you pick:
+![The graph view after a demo run](assets/demo-graph.png)
 
-- **Hosted mode (default)** — note text is sent to **Groq** for extraction, verification and relationship reasoning, and concept summaries are sent to **Google** for embeddings. Their data policies apply.
-- **Local mode** — set `LLM_PROVIDER=ollama` and `EMBEDDING_PROVIDER=ollama` and everything runs against your own [Ollama](https://ollama.com) server. With both on Ollama (and `OLLAMA_BASE_URL` pointing at your machine), note content never leaves it.
+| Run | Results | Diff preview |
+|---|---|---|
+| ![Run tab with the finished stage tracker](assets/demo-run.png) | ![Results tab with scored links](assets/demo-results.png) | ![Per-note diff in preview mode](assets/demo-diff.png) |
 
-You can also mix the two, e.g. a local LLM with Google embeddings.
+*Screenshots are from `constellation demo`, an offline run over the bundled [15-note example vault](examples/demo-vault/).*
 
-## Obsidian plugin
+## Try it in three commands
 
-Constellation also ships as a native Obsidian plugin in [`obsidian-plugin/`](obsidian-plugin/), so you never have to leave Obsidian. It is a TypeScript port of the same pipeline with no Python dependency: everything runs inside Obsidian.
-
-**Install manually**
+No API keys, no network: the demo runs the real pipeline with canned model responses.
 
 ```bash
-cd obsidian-plugin
-npm install
-npm run build
+git clone https://github.com/krxsh007/constellation && cd constellation
+pip install -e .
+constellation demo
 ```
 
-Copy `main.js`, `manifest.json` and `styles.css` into `<your vault>/.obsidian/plugins/constellation/`, then enable **Constellation** under Settings → Community plugins.
+That prints the run report, every tag and score-ranked link, and the diff it would apply to a note. `constellation demo --write` applies it to a temporary copy you can open in Obsidian. For the UI, run `streamlit run app.py` and click **Try the demo vault**.
 
-**Install with BRAT**: once a GitHub release of this repo has `main.js`, `manifest.json` and `styles.css` attached as assets, add `krxsh007/constellation` in [BRAT](https://github.com/TfTHacker/obsidian42-brat) ("Add beta plugin"). BRAT also reads a `manifest.json` from the repository root, so that file has to exist there for BRAT to find the plugin.
+## Two ways to use it
 
-**Using it**
-
-- Ribbon icon (✦) opens the Constellation panel in the right sidebar. It shows the 7 pipeline stages live, stats for the last run, and the related notes of the note you have open (click one to open it).
-- Commands: *Link entire vault*, *Link current note*, *Preview changes* (a diff per note with Apply / Cancel; nothing is written until you apply), *Undo last run*, *Remove all Constellation output*.
-- The status bar shows progress while a run is going.
-- Settings: LLM provider (Groq or Ollama), Groq keys (one per line, rotated on rate limits), models, embedding provider (Gemini or Ollama), max links per note, annotations, backlinks, frontmatter tags, excluded folders, concurrency.
-
-**How it compares to the Python app**
-
-| | Python app | Obsidian plugin |
+| | **Python app + CLI** (this repo's root) | **Obsidian plugin** ([`obsidian-plugin/`](obsidian-plugin/)) |
 |---|---|---|
-| Prompts, two-pass verification, link scoring and cap | same | same |
-| `## Tags` / `## Related Links` rules (only lines the tool wrote are replaced) | `nodes/io.py` | `src/sections.ts`, checked against the Python output by a parity fixture |
-| Vector search | FAISS index in the vault | JSON vector list + cosine similarity in the plugin folder |
-| Change detection | MD5 of the note minus generated sections | Hash of the note *body* minus generated sections (frontmatter edits do not trigger re-extraction) |
-| Writes | temp-file swap, skips notes edited mid-run | `vault.process()` (atomic), skips notes edited mid-run; frontmatter via `processFrontMatter` |
-| Undo | `.constellation_backups/` in the vault | snapshots in the plugin folder |
+| For | Batch runs, scripting, watch mode, local Ollama | Staying inside Obsidian |
+| Interface | Streamlit UI (Run · Results · Graph · History & Undo) and the `constellation` CLI | Side panel, commands, a preview modal with Apply/Cancel |
+| Stack | Python, LangGraph, FAISS | TypeScript, no Python dependency |
+| Vector search | FAISS index stored in the vault | JSON vectors + cosine in the plugin folder |
 
-The two keep separate caches, so running both against the same vault re-extracts each note once per tool. They write the same sections, so either can clean up after the other.
+Both use the same prompts, the same two verification passes, the same link scoring and the same rules for which lines they may touch, so either can clean up after the other. [Plugin details ↓](#obsidian-plugin)
 
-**Where data lives**: API keys and settings are stored in `.obsidian/plugins/constellation/data.json` inside your vault, in plain text. Keep that in mind if you sync or share the vault, and exclude that file from public repos. The cache (`cache.json`), vector index (`index.json`) and undo snapshots (`backups/`) live in the same folder. Note text is sent to Groq and concept summaries to Google unless you choose Ollama for both.
+## Why it's interesting
 
-**Development**: `npm run dev` rebuilds on change, `npm test` runs the vitest suite (pure logic plus offline end-to-end runs with a fake vault and fake providers). `python obsidian-plugin/scripts/gen_parity_fixture.py` regenerates the Python parity fixture.
+- **Two-pass LLM verification.** Extraction is generous by design, so a second call prunes unsupported concepts and tags. Proposed links get the same treatment from a verifier whose only job is to reject weak ones. Deterministic filters then drop self-links, duplicates and links to notes that don't exist.
+- **Content-hash incremental cache.** Each note is hashed without the sections the tool wrote, so re-runs cost tokens only for notes you actually edited. Failed notes are retried, and extraction is checkpointed so a crash later in the run doesn't waste it.
+- **Score-ranked link caps.** Every link is scored by embedding similarity plus a bonus per independent supporting concept pair. When a note has more candidates than the cap, the strongest links win, not the alphabetically first.
+- **Pickle-free FAISS.** The index lives inside a vault people sync and share, so it is stored as raw FAISS + JSON and never unpickled. An embedding manifest stops vectors from different models from being mixed.
+- **Edit-safe writes.** Only lines the tool generated are ever replaced. Notes you edit mid-run are skipped, writes are atomic temp-file swaps, every run is backed up first and can be undone, and a lock allows one run per vault.
+- **API key rotation.** Several free-tier keys are rotated on rate limits (compare-and-swap, so concurrent calls rotate once). Oversized requests are retried with smaller input, and malformed JSON is repaired.
+- **Offline-tested pipeline.** 95 Python tests and 64 plugin tests run without network or keys, driving the real LangGraph graph end to end with fake LLM and embedding back-ends. CI also runs pyright, ruff, coverage and the demo.
 
-## Pipeline Graph
+The reasoning behind each of these, plus the alternatives rejected and the known limitations, is in **[docs/DESIGN.md](docs/DESIGN.md)**.
 
-![Constellation Pipeline](assets/graph_visualization.png)
+## How it works
 
-## What it does
+```mermaid
+flowchart LR
+    A["Vault Reader<br/>hash notes, diff vs cache"] --> B["Concept Extractor<br/>LLM: concepts + tags"]
+    B --> C["Concept Verifier<br/>LLM: prune, then embed into FAISS"]
+    C --> D["Relationship Extractor<br/>FAISS top-k, LLM proposes links"]
+    D --> E["Relationship Verifier<br/>LLM + structural filters, scoring"]
+    E --> F["Link Writer<br/>backup, edit check, atomic write"]
+    F --> G["Summary Reporter<br/>cache, run report"]
+```
 
-- **Concept extraction** — reads each note and pulls out its key ideas, technologies and entities.
-- **Smart tagging** — appends 3–5 relevant hashtags (`#machine-learning`, `#devops`) under a `## Tags` heading, or into the YAML frontmatter `tags:` list.
-- **Semantic cross-linking** — embeds every concept into a **local FAISS index** stored inside the vault, finds semantically related concepts in *other* notes, and writes `- [[Other Note]]` bullets under `## Related Links`.
-- **Ranked links** — every link carries a score (FAISS similarity plus a bonus per supporting concept pair); when a note has more candidates than the cap, the strongest ones win.
-- **Backlinks (optional)** — every link A → B can also be written as B → A.
-- **Strict quality control** — a second LLM pass plus structural filtering rejects weak links, self-links, duplicates and links to notes that don't exist.
-- **Cost-efficient caching** — hashes each note (ignoring the auto-generated sections) so re-runs only spend tokens on notes you actually changed. Notes whose extraction failed are retried on the next run, and extraction results are checkpointed so a crash later in the run doesn't waste them.
-- **Safe writes** — every note is backed up before it is rewritten (undo with `--restore`), notes you edit while a run is in progress are left alone, and only one run can work on a vault at a time.
-- **API key rotation** — supply several Groq/Google keys and it rotates through them with exponential backoff when it hits free-tier rate limits.
-- **Preview mode** — run the whole pipeline and see exactly what it would write (before/after per note), without touching a single file.
-- **Watch mode** — keep it running and it re-links whenever a note changes.
-- **Run report** — LLM calls, tokens, embedding requests, links added/removed and failures for every run.
+1. **Vault Reader** (`nodes/io.py`) finds new or edited notes by content hash, skipping `.obsidian`, `.trash`, `.git` and excluded folders.
+2. **Concept Extractor** (`nodes/concepts.py`) extracts structured concepts and 3–5 tags per note, concurrently.
+3. **Concept Verifier** prunes them, checkpoints them to the cache, and re-embeds them into the vault-local FAISS index, dropping vectors for edited, renamed or deleted notes.
+4. **Relationship Extractor** (`nodes/relations.py`) retrieves the nearest concepts from *other* notes and asks the LLM which are genuinely related, with evidence.
+5. **Relationship Verifier** gets a second opinion, applies structural filters and scores the links.
+6. **Link Writer** backs up, then rewrites only the generated sections of notes whose output changed, including notes that lost a link because its target disappeared.
+7. **Summary Reporter** saves the cache and the run report.
 
-## Tech stack
+What ends up in a note (or in the frontmatter `tags:` list with `--frontmatter-tags`):
 
-- **Streamlit** — the local UI.
-- **LangGraph / LangChain** — the 7-node pipeline (read → extract → verify → relate → verify → write → report).
-- **Groq** or **Ollama** — inference for extraction, verification and relationship reasoning.
-- **Google Generative AI** (`models/gemini-embedding-2`) or **Ollama** (`nomic-embed-text` by default) — concept embeddings.
-- **FAISS** — local, on-disk vector index. No cloud database, no account needed.
+```markdown
+## Tags
+#kubernetes #container-orchestration #devops
+
+## Related Links
+- [[Raft Consensus]] — etcd stays consistent by electing a Raft leader
+- [[Docker]]
+```
+
+Only lines the tool generates (a run of hashtags, `- [[link]]` bullets) are ever replaced. The first line of your own prose, a heading or a code fence ends the section, and everything after it is left alone.
+
+## Evaluation
+
+Precision and recall of the generated links against a labelled vault, with ablations: see [eval/RESULTS.md](eval/RESULTS.md).
 
 ## Setup
 
-1. **Clone the repo** and activate your environment:
-   ```bash
-   conda activate langgraph
-   ```
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   # Only for local mode:
-   pip install langchain-ollama
-   ```
-3. **Configure** by copying the template file to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-   Hosted mode needs API keys. Multiple keys of the same type are rotated automatically:
-   ```env
-   # Groq (extraction, verification, relationships)
-   GROQ_API_KEY_1="gsk_..."
-   GROQ_API_KEY_2="gsk_..."
+Requires Python 3.11–3.13.
 
-   # Google (embeddings)
-   GOOGLE_API_KEY_1="AIza..."
-   ```
-   Local mode needs no keys — run `ollama serve`, pull the models, and point Constellation at them:
-   ```bash
-   ollama pull llama3.1:8b
-   ollama pull nomic-embed-text
-   ```
-   ```env
-   LLM_PROVIDER=ollama
-   EMBEDDING_PROVIDER=ollama
-   OLLAMA_BASE_URL=http://localhost:11434
-   OLLAMA_LLM_MODEL=llama3.1:8b
-   OLLAMA_EMBEDDING_MODEL=nomic-embed-text
-   ```
-   Other options (all optional):
-   ```env
-   EXCLUDED_DIRS="Templates,Archive,Daily Notes"
-   MAX_LINKS_PER_NOTE=5
-   ANNOTATE_LINKS=false
-   BACKLINKS=false
-   TAGS_IN_FRONTMATTER=false
-   MAX_BACKUPS=10
-   ```
-   You can also paste keys straight into the app's sidebar instead of using `.env`.
+```bash
+pip install -e .                   # or: pip install -r requirements.txt
+pip install -e '.[ollama]'         # only for local mode
+cp .env.example .env
+```
+
+**Providers.** What leaves your machine depends on the providers you choose:
+
+- **Hosted (default):** note text goes to **Groq** for extraction, verification and relationships, and concept summaries go to **Google** for embeddings.
+- **Local:** with `LLM_PROVIDER=ollama` and `EMBEDDING_PROVIDER=ollama`, everything runs against your own [Ollama](https://ollama.com) server and note content never leaves your machine. You can also mix the two.
+
+```env
+# Hosted: several keys of a type are rotated on rate limits
+GROQ_API_KEY_1="gsk_..."
+GROQ_API_KEY_2="gsk_..."
+GOOGLE_API_KEY_1="AIza..."
+
+# Local (after: ollama pull llama3.1:8b && ollama pull nomic-embed-text)
+LLM_PROVIDER=ollama
+EMBEDDING_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_LLM_MODEL=llama3.1:8b
+OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+
+# Optional
+EXCLUDED_DIRS="Templates,Archive,Daily Notes"
+MAX_LINKS_PER_NOTE=5
+ANNOTATE_LINKS=false
+BACKLINKS=false
+TAGS_IN_FRONTMATTER=false
+MAX_BACKUPS=10
+```
+
+Keys can also be pasted into the app's sidebar.
 
 ## Usage
 
 ```bash
-streamlit run app.py
+streamlit run app.py                                     # UI
+constellation /path/to/vault --dry-run                   # preview: writes nothing, prints the report
+constellation /path/to/vault --exclude "Templates" --annotate
+constellation /path/to/vault --llm-provider ollama --embedding-provider ollama --watch 30
+constellation /path/to/vault --list-backups              # then --restore 20261017-153012 to undo
+constellation /path/to/vault --strip                     # remove everything Constellation wrote
+python3 scripts/monitor_keys.py                          # rate-limit headroom on every key
 ```
 
-Paste the full path to your vault (e.g. `C:\Users\saraf\Documents\VOID`), then hit **Run linker**. Progress streams live, and when it finishes you get tables of every link, tag and concept it produced.
+`constellation` is the same as `python3 main.py`.
 
-Options available in the CLI (most are also in the UI):
+<details>
+<summary>All CLI flags</summary>
 
 | Flag | Env var | What it does |
 | --- | --- | --- |
-| `--dry-run` / `-n` | | Runs everything but writes nothing; the final state holds a before/after `preview` per note. |
-| `--force` / `-f` | | Clears the cache and concept index so the whole vault is rebuilt from scratch. |
-| `--max-links N` | `MAX_LINKS_PER_NOTE` | Caps the wikilinks written to any single note (default 5); the highest-scoring links are kept. |
-| `--annotate` | `ANNOTATE_LINKS` | Appends reasoning to wikilinks (`- [[Target]] — reason`). |
-| `--exclude "A,B"` | `EXCLUDED_DIRS` | Ignores folders such as `Templates/`, `Archive/`, `Daily Notes/`. |
-| `--backlinks` | `BACKLINKS` | Also writes B → A for every link A → B (same evidence and score, still capped). |
-| `--frontmatter-tags` | `TAGS_IN_FRONTMATTER` | Writes tags into the frontmatter `tags:` list (without `#`) instead of a `## Tags` section. Your own tags are kept; only tags Constellation added are ever removed. |
-| `--llm-provider groq\|ollama` | `LLM_PROVIDER` | Hosted Groq (default) or a local Ollama model (`OLLAMA_LLM_MODEL`). |
-| `--embedding-provider google\|ollama` | `EMBEDDING_PROVIDER` | Hosted Google (default) or local Ollama embeddings (`OLLAMA_EMBEDDING_MODEL`). Switching rebuilds the index automatically. |
-| `--watch SECONDS` | | Runs, then polls the vault and re-runs whenever a note changes (its own writes are ignored). Ctrl+C to stop. |
-| `--strip` | | Removes everything Constellation wrote (sections and its frontmatter tags) from every note, after a backup, then deletes the cache and index. Combine with `--dry-run` to just count. |
-| `--list-backups` | | Lists the pre-write backups, newest first. |
-| `--restore NAME` | | Copies the notes in backup `NAME` back into the vault (they are re-linked on the next run). |
-| | `MAX_BACKUPS` | How many backups to keep (default 10). |
+| `--dry-run` / `-n` | | Runs everything but writes nothing; the result holds a before/after preview per note. |
+| `--force` / `-f` | | Clears the cache and index so the whole vault is rebuilt. |
+| `--max-links N` | `MAX_LINKS_PER_NOTE` | Caps the links per note (default 5); the highest-scoring links are kept. |
+| `--annotate` | `ANNOTATE_LINKS` | Writes `- [[Target]] — reason`. |
+| `--exclude "A,B"` | `EXCLUDED_DIRS` | Ignores folders such as `Templates/` or `Archive/`. |
+| `--backlinks` | `BACKLINKS` | Also writes B → A for every A → B (same score, still capped). |
+| `--frontmatter-tags` | `TAGS_IN_FRONTMATTER` | Puts tags in the frontmatter `tags:` list. Your own tags are kept; only the tool's tags are ever removed. |
+| `--llm-provider groq\|ollama` | `LLM_PROVIDER` | Hosted Groq (default) or local Ollama. |
+| `--embedding-provider google\|ollama` | `EMBEDDING_PROVIDER` | Hosted Google (default) or local Ollama. Switching rebuilds the index. |
+| `--watch SECONDS` | | Re-runs whenever a note changes; its own writes are ignored. |
+| `--strip` | | Removes all generated sections and tags (after a backup), then deletes the cache and index. |
+| `--list-backups` / `--restore NAME` | `MAX_BACKUPS` | Lists or restores pre-write snapshots (newest 10 kept by default). |
+| `demo [--write] [--dir PATH]` | | Offline run on the bundled example vault. |
 
-```bash
-# Basic run
-python3 main.py "C:/path/to/vault"
+</details>
 
-# Preview run with folder exclusions and annotated links
-python3 main.py "C:/path/to/vault" --dry-run --annotate --exclude "Templates,Archive"
-
-# Fully local, with backlinks, re-running on every change
-python3 main.py "C:/path/to/vault" --llm-provider ollama --embedding-provider ollama --backlinks --watch 30
-
-# Undo the last run
-python3 main.py "C:/path/to/vault" --list-backups
-python3 main.py "C:/path/to/vault" --restore 20261017-153012
-
-# Remove everything Constellation ever wrote
-python3 main.py "C:/path/to/vault" --strip
-
-# Check rate-limit headroom on every key
-python3 scripts/monitor_keys.py
-
-# Run test suite
-python3 -m unittest discover tests
-```
-
-After each run the CLI prints a compact report:
+Each run ends with a report:
 
 ```
 Notes: 120 total, 4 processed, 0 failed, 6 written
@@ -187,63 +168,49 @@ Duration: 41.3s
 Backup: /path/to/vault/.constellation_backups/20261017-153012
 ```
 
-## How it works
+<details>
+<summary>Files it creates inside your vault</summary>
 
-1. **Vault Reader** (`nodes/io.py`) — scans for `.md` files (skipping `.obsidian`, `.trash`, `.git` and Constellation's own folders) in a stable sorted order and diffs them against `.linker_cache.json` to find new or edited notes.
-2. **Concept Extractor** (`nodes/concepts.py`) — sends new notes to the LLM concurrently, extracting structured concepts and tags. Failures are recorded and retried next run.
-3. **Concept Verifier** — cleans and de-duplicates the results, checkpoints them to the cache, then (in a worker thread, in batches) re-embeds them into `.linker_faiss_index`, dropping stale vectors for edited, renamed or deleted notes.
-4. **Relationship Extractor** (`nodes/relations.py`) — queries the FAISS index for the most similar concepts in *other* notes and asks the LLM which are genuinely related.
-5. **Relationship Verifier** — a second opinion, plus structural filtering (no self-links, no duplicates, no links to non-existent notes) and link scoring.
-6. **Link Writer** (`nodes/io.py`) — backs up, then rewrites the `## Tags` and `## Related Links` sections of every note whose output changed (including notes that lost a link because its target was deleted or renamed) via a temp-file swap. A note edited since it was read is skipped.
-7. **Summary Reporter** — saves the cache and the run report so the next run is cheap.
+All of these can be deleted and will be rebuilt, except that deleting the backups loses your undo history.
 
-## What it writes to your notes
+- `.linker_cache.json`: hashes, concepts, scored links, tags, what was rendered last time, and the extraction checkpoint.
+- `.linker_faiss_index/`: `index.faiss`, `docstore.json`, `manifest.json`. No pickle files are written or read.
+- `.linker_report.json`: the report of the last real run.
+- `.constellation_backups/<timestamp>/`: copies of the notes taken right before a run changed them.
+- `.linker.lock`: present only while a run is in progress. A lock left by a dead process or older than 6 hours is treated as stale.
 
-It appends (and thereafter maintains) two sections at the end of a note:
+</details>
 
-```markdown
-## Tags
-#containerization #devops
+## Obsidian plugin
 
-## Related Links
-- [[Docker]] — Container runtime and deployment platform
-- [[Kubernetes Orchestration]]
-```
+[`obsidian-plugin/`](obsidian-plugin/) is a TypeScript port of the pipeline that runs entirely inside Obsidian.
 
-With `TAGS_IN_FRONTMATTER=true` the tags go into the frontmatter instead, merged with your own:
+**Install manually:** run `cd obsidian-plugin && npm install && npm run build`, copy `main.js`, `manifest.json` and `styles.css` into `<vault>/.obsidian/plugins/constellation/`, then enable **Constellation** under Settings → Community plugins.
 
-```markdown
----
-tags:
-  - my-own-tag
-  - containerization
-  - devops
----
-```
+**Install with [BRAT](https://github.com/TfTHacker/obsidian42-brat):** add `krxsh007/constellation` once a GitHub release has `main.js`, `manifest.json` and `styles.css` attached. BRAT also reads a `manifest.json` from the repository root.
 
-Only lines the tool itself generated — a run of hashtags, or `- [[link]]` bullets (with or without reasoning annotations) — are ever replaced. As soon as it hits anything else (your prose, a heading, a code fence) it stops and leaves the rest of the file alone, so notes you keep editing by hand are safe. `tests/test_notes.py` covers this.
+**Using it**
+- The ribbon icon (✦) opens a side panel with the 7 stages running live, stats for the last run, and related notes for the open note.
+- Commands: *Link entire vault*, *Link current note*, *Preview changes* (a per-note diff with Apply / Cancel), *Undo last run*, *Remove all Constellation output*.
+- Settings: providers (Groq or Ollama, Gemini or Ollama), keys (one per line, rotated), models, link cap, annotations, backlinks, frontmatter tags, excluded folders, concurrency.
 
-## Files it creates inside your vault
+**How it differs from the Python app:** HTTP goes through Obsidian's `requestUrl` (no CORS issues). Vectors are L2-normalised and stored as JSON with cosine search instead of FAISS. Change detection hashes the note body, so frontmatter edits don't trigger re-extraction. Writes use `vault.process()` / `processFrontMatter`, and undo snapshots live in the plugin folder. A parity fixture generated from the Python code checks that both produce the same sections. The two tools keep separate caches. See [DESIGN.md](docs/DESIGN.md#the-obsidian-plugin-port) for the reasoning.
 
-All of these are safe to delete (they'll be rebuilt), except that deleting backups removes your undo history:
+**Where data lives:** settings *and API keys* are stored in plain text in `.obsidian/plugins/constellation/data.json`. Exclude that file if you sync or publish your vault. The cache (`cache.json`), vector index (`index.json`) and undo snapshots (`backups/`) are in the same folder.
 
-- `.linker_cache.json` — file hashes, concepts, scored links, tags, the link sets and frontmatter tags written last time, and a checkpoint of extraction results.
-- `.linker_faiss_index/` — the local vector index: `index.faiss` (vectors), `docstore.json` (concept text/metadata) and `manifest.json` (embedding provider, model and dimension). No pickle files are written or loaded; an index built with a different embedding model, or an old pickle-based index, is discarded and rebuilt from the cache.
-- `.linker_report.json` — the report of the last real run.
-- `.constellation_backups/<YYYYmmdd-HHMMSS>/` — copies of the notes taken right before each run modified them (newest `MAX_BACKUPS` kept).
-- `.linker.lock` — present only while a run is in progress (holds the pid and start time). A lock whose process is gone or that is older than 6 hours is treated as stale.
+**Development:** `npm run dev` rebuilds on change, and `npm test` runs the vitest suite (pure logic plus offline end-to-end runs with a fake vault and fake providers).
 
 ## Development
 
 ```bash
-pip install -e '.[dev]'                 # editable install + ruff and pytest
-constellation /path/to/vault --dry-run  # the CLI entry point (same as python3 main.py)
-python3 -m unittest discover tests      # offline test suite, no API keys needed
-ruff check .                            # lint
+pip install -e '.[dev]'           # ruff, pyright, pytest, pytest-cov
+python3 -m unittest discover tests
+ruff check . && ruff format --check . && pyright
+pytest --cov                      # coverage report
 ```
 
-Supported Python versions are 3.11 to 3.13. CI runs lint and tests on all three.
+CI runs all of these on Python 3.11–3.13, plus the offline demo and the plugin build and tests. Tagging `v*` attaches the sdist and wheel to a GitHub release. See [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)
