@@ -17,6 +17,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Constellation", page_icon="✦", layout="wide")
 
+from constellation import demo
 from constellation.core import config, vectorstore
 from constellation.core import log as logmod
 from constellation.core.backup import list_backups, restore_backup
@@ -60,6 +61,26 @@ def parse_keys(text: str):
 
 def vault_dir() -> str:
     return clean_path(st.session_state.get("vault_path", ""))
+
+
+def is_demo_vault(path: str) -> bool:
+    return bool(path) and path == st.session_state.get("demo_vault")
+
+
+def start_demo() -> None:
+    """Button callback: copy the bundled demo vault to a temp folder, point the
+    app at it with preview-friendly options and queue a run. Runs as a callback
+    so it can set the vault path before the text input is drawn."""
+    try:
+        path = str(demo.copy_demo_vault())
+    except (OSError, ValueError) as e:
+        st.session_state["demo_error"] = str(e)
+        return
+    st.session_state.update(vault_path=path, demo_vault=path, demo_autorun=True)
+    st.session_state["opts"].update(dry_run=True, force=False, excluded=", ".join(demo.DEMO_EXCLUDED_DIRS))
+    # Drop the widgets' own state so they redraw from the updated options.
+    for name in ("dry_run", "force", "excluded"):
+        st.session_state.pop(f"w_{name}", None)
 
 
 def inject_theme() -> None:
@@ -182,9 +203,17 @@ def render_vault_panel(info) -> bool:
             help="Absolute path to the folder your notes live in.",
             label_visibility="collapsed",
         )
+        st.button("Try the demo vault", key="demo_btn", on_click=start_demo, icon=":material/science:",
+                  help="Copies a 15-note example vault to a temp folder and previews a run with canned "
+                       "model answers. No API keys needed.")
+        if st.session_state.get("demo_error"):
+            st.html(ui.callout(f"Couldn't copy the demo vault: {st.session_state.pop('demo_error')}", "err"))
         path = vault_dir()
         if not path:
             return False
+        if is_demo_vault(path):
+            st.html(ui.callout("Demo vault: a temporary copy of `examples/demo-vault`. Runs on it use canned "
+                               "model answers, so no API keys or network are needed.", "info", "shield"))
         if info is None:
             st.html(ui.callout("That path is not a directory. Paste the full path to your vault.", "err"))
             return False
@@ -267,7 +296,8 @@ def execute_run(path: str) -> None:
     """Runs the pipeline with live stage tracking and stores the result."""
     from main import run_pipeline
 
-    missing = config.missing_keys()
+    offline = is_demo_vault(path)
+    missing = [] if offline else config.missing_keys()
     if missing:
         st.html(ui.callout(f"Missing API key(s): {', '.join(missing)}. Add them in the sidebar or `.env`.", "err"))
         return
@@ -298,7 +328,12 @@ def execute_run(path: str) -> None:
         try:
             if st.session_state["opts"]["force"]:
                 st.toast(f"Reset: {reset_vault_state(path)}")
-            result = run_pipeline(path, dry_run=dry_run)
+            if offline:
+                # A short per-call delay lets the stage tracker visibly advance.
+                with demo.offline_backends(latency=0.03):
+                    result = run_pipeline(path, dry_run=dry_run)
+            else:
+                result = run_pipeline(path, dry_run=dry_run)
             st.session_state.update(
                 result=result, result_dry_run=dry_run,
                 result_duration=time.time() - started, log=list(lines))
@@ -329,7 +364,7 @@ def render_run_tab(info) -> None:
     if info is None:
         if not vault_dir():
             st.html(ui.empty_state("Connect your vault",
-                                   "Paste the path to your Obsidian vault above to map its notes into a constellation.",
+                                   "Paste the path to your Obsidian vault above, or try the demo vault to see a run without API keys.",
                                    "vault"))
         return
     with st.container(key="run_layout"):
@@ -338,7 +373,7 @@ def render_run_tab(info) -> None:
             render_options()
         with right:
             clicked = render_launch(can_run)
-    if clicked:
+    if st.session_state.pop("demo_autorun", False) or clicked:
         execute_run(vault_dir())
     elif st.session_state.get("log"):
         with st.expander("Last run log"):
@@ -585,7 +620,10 @@ def main() -> None:
     inject_theme()
     render_sidebar()
     info = current_vault_info()
-    st.html(ui.hero("".join(provider_chips() + [vault_chip(info)]), TAGLINE))
+    chips = provider_chips() + [vault_chip(info)]
+    if is_demo_vault(vault_dir()):
+        chips.append(ui.chip("Demo · offline", "accent", "Canned model answers; no API calls"))
+    st.html(ui.hero("".join(chips), TAGLINE))
     t_run, t_results, t_graph, t_hist = st.tabs(["Run", "Results", "Graph", "History & Undo"])
     with t_run:
         render_run_tab(info)

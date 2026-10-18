@@ -1,0 +1,288 @@
+{
+  "_about": "Canned LLM and embedding responses for `constellation demo`. Notes are matched by their '# Heading'. 'raw_tags' and 'rejected_concepts' are what the first (extraction) pass returns on top of the verified output, so the verification pass has something to remove; relationships with \"verified\": false are proposed by the relationship pass and rejected by its verifier. Each concept's 'topics' weights become its embedding over 'embedding_axes'.",
+  "embedding_axes": ["devops", "ml", "systems", "pkm"],
+  "notes": {
+    "Docker": {
+      "tags": ["#containers", "#devops", "#docker"],
+      "raw_tags": ["#notes-to-self"],
+      "concepts": [
+        {"concept_name": "Container Image", "category": "Infrastructure", "importance_score": 9,
+         "explanation": "A stack of cached, read-only layers built from a Dockerfile that runs identically on a laptop, in CI and in production.",
+         "important_keywords": ["image", "layers", "Dockerfile", "multi-stage build"], "related_concepts": ["Container Runtime Isolation"],
+         "topics": {"devops": 1.0}},
+        {"concept_name": "Container Runtime Isolation", "category": "Infrastructure", "importance_score": 7,
+         "explanation": "Containers are processes with their own filesystem, network namespace and resource limits that share the host kernel.",
+         "important_keywords": ["namespace", "kernel", "isolation"], "related_concepts": ["Container Image"],
+         "topics": {"devops": 0.9, "systems": 0.35}}
+      ],
+      "rejected_concepts": [
+        {"concept_name": "Works On My Machine", "category": "Misc", "importance_score": 2,
+         "explanation": "A phrase mentioned in passing.", "important_keywords": [], "related_concepts": []}
+      ]
+    },
+    "Kubernetes": {
+      "tags": ["#kubernetes", "#container-orchestration", "#devops"],
+      "raw_tags": ["#gotchas"],
+      "concepts": [
+        {"concept_name": "etcd Cluster State", "category": "Distributed Systems", "importance_score": 8,
+         "explanation": "etcd is the strongly consistent key-value store holding all cluster state; losing quorum halts the control plane.",
+         "important_keywords": ["etcd", "quorum", "control plane"], "related_concepts": ["Leader Election"],
+         "topics": {"devops": 0.5, "systems": 0.85}},
+        {"concept_name": "Pod Scheduling", "category": "Infrastructure", "importance_score": 9,
+         "explanation": "The scheduler places pods, groups of containers sharing a network namespace, onto nodes based on resource requests and affinity rules.",
+         "important_keywords": ["pod", "scheduler", "resource requests"], "related_concepts": ["Container Image"],
+         "topics": {"devops": 1.0, "systems": 0.2}}
+      ],
+      "rejected_concepts": []
+    },
+    "Helm Charts": {
+      "tags": ["#helm", "#kubernetes", "#deployment"],
+      "raw_tags": [],
+      "concepts": [
+        {"concept_name": "Helm Chart Templating", "category": "Infrastructure", "importance_score": 8,
+         "explanation": "A chart is a folder of Go-templated Kubernetes manifests rendered with values.yaml into a named release.",
+         "important_keywords": ["chart", "values.yaml", "release"], "related_concepts": ["Pod Scheduling"],
+         "topics": {"devops": 1.0}},
+        {"concept_name": "Release Rollback", "category": "Infrastructure", "importance_score": 6,
+         "explanation": "Every Helm upgrade creates a revision, so a single rollback command restores an earlier set of manifests.",
+         "important_keywords": ["revision", "rollback"], "related_concepts": [],
+         "topics": {"devops": 0.85, "systems": 0.3}}
+      ],
+      "rejected_concepts": []
+    },
+    "CI CD Pipelines": {
+      "tags": ["#ci-cd", "#devops", "#automation"],
+      "raw_tags": ["#best-practice"],
+      "concepts": [
+        {"concept_name": "Continuous Integration", "category": "Practice", "importance_score": 9,
+         "explanation": "Every push is built and tested automatically so broken changes are caught within minutes.",
+         "important_keywords": ["build", "test", "pipeline"], "related_concepts": ["Image Build Pipeline"],
+         "topics": {"devops": 1.0}},
+        {"concept_name": "Image Build Pipeline", "category": "Practice", "importance_score": 7,
+         "explanation": "The pipeline builds a container image tagged with the commit SHA, pushes it and upgrades the Helm release.",
+         "important_keywords": ["image tag", "registry", "staging"], "related_concepts": ["Container Image", "Helm Chart Templating"],
+         "topics": {"devops": 1.0, "systems": 0.1}}
+      ],
+      "rejected_concepts": []
+    },
+    "Neural Networks": {
+      "tags": ["#machine-learning", "#neural-networks", "#deep-learning"],
+      "raw_tags": [],
+      "concepts": [
+        {"concept_name": "Multilayer Perceptron", "category": "Machine Learning", "importance_score": 8,
+         "explanation": "Fully connected layers with non-linear activations; without the non-linearities the stack collapses to one linear map.",
+         "important_keywords": ["MLP", "ReLU", "layers"], "related_concepts": ["Backpropagation"],
+         "topics": {"ml": 1.0}},
+        {"concept_name": "Backpropagation", "category": "Machine Learning", "importance_score": 9,
+         "explanation": "Applies the chain rule backwards through the layers to get the gradient of the loss with respect to every weight.",
+         "important_keywords": ["chain rule", "gradient", "loss"], "related_concepts": ["Stochastic Gradient Descent"],
+         "topics": {"ml": 1.0, "systems": 0.05}}
+      ],
+      "rejected_concepts": [
+        {"concept_name": "MNIST", "category": "Dataset", "importance_score": 2,
+         "explanation": "Mentioned only as an example dataset.", "important_keywords": [], "related_concepts": []}
+      ]
+    },
+    "Gradient Descent": {
+      "tags": ["#machine-learning", "#optimization"],
+      "raw_tags": ["#hyperparameters"],
+      "concepts": [
+        {"concept_name": "Stochastic Gradient Descent", "category": "Machine Learning", "importance_score": 9,
+         "explanation": "Steps parameters against the gradient of a mini-batch; the noise helps escape sharp minima.",
+         "important_keywords": ["SGD", "mini-batch", "momentum", "Adam"], "related_concepts": ["Backpropagation"],
+         "topics": {"ml": 1.0}},
+        {"concept_name": "Learning Rate Schedule", "category": "Machine Learning", "importance_score": 7,
+         "explanation": "The most important hyperparameter; warmup followed by cosine decay is a solid default.",
+         "important_keywords": ["learning rate", "warmup", "cosine decay"], "related_concepts": [],
+         "topics": {"ml": 0.95, "devops": 0.05}}
+      ],
+      "rejected_concepts": []
+    },
+    "Transformers": {
+      "tags": ["#machine-learning", "#transformers", "#attention"],
+      "raw_tags": ["#2017"],
+      "concepts": [
+        {"concept_name": "Self-Attention", "category": "Machine Learning", "importance_score": 10,
+         "explanation": "Each token's representation is a weighted mix of every other token, weighted by learned query and key dot products.",
+         "important_keywords": ["attention", "query", "key", "value"], "related_concepts": ["Positional Encoding"],
+         "topics": {"ml": 1.0, "pkm": 0.05}},
+        {"concept_name": "Positional Encoding", "category": "Machine Learning", "importance_score": 7,
+         "explanation": "Added to token embeddings because attention is permutation-invariant and otherwise ignores word order.",
+         "important_keywords": ["position", "order", "embedding"], "related_concepts": ["Self-Attention"],
+         "topics": {"ml": 0.9, "systems": 0.1}}
+      ],
+      "rejected_concepts": []
+    },
+    "Text Embeddings": {
+      "tags": ["#machine-learning", "#embeddings", "#semantic-search"],
+      "raw_tags": [],
+      "concepts": [
+        {"concept_name": "Sentence Embedding", "category": "Machine Learning", "importance_score": 9,
+         "explanation": "A transformer encoder maps text to a dense vector so that texts with similar meaning land close together.",
+         "important_keywords": ["dense vector", "encoder", "pooling"], "related_concepts": ["Self-Attention", "Cosine Similarity"],
+         "topics": {"ml": 0.9, "pkm": 0.35}},
+        {"concept_name": "Cosine Similarity", "category": "Mathematics", "importance_score": 7,
+         "explanation": "The cosine of the angle between two vectors; equal to the dot product for normalised vectors.",
+         "important_keywords": ["cosine", "dot product", "normalised"], "related_concepts": ["Sentence Embedding"],
+         "topics": {"ml": 0.85, "systems": 0.3}}
+      ],
+      "rejected_concepts": []
+    },
+    "Vector Search": {
+      "tags": ["#vector-search", "#embeddings", "#faiss"],
+      "raw_tags": ["#databases"],
+      "concepts": [
+        {"concept_name": "Approximate Nearest Neighbour Search", "category": "Algorithms", "importance_score": 9,
+         "explanation": "ANN indexes trade a little recall for orders of magnitude faster nearest-neighbour lookups than a linear scan.",
+         "important_keywords": ["ANN", "recall", "HNSW", "IVF"], "related_concepts": ["FAISS Index"],
+         "topics": {"ml": 0.75, "systems": 0.55}},
+        {"concept_name": "FAISS Index", "category": "Tools", "importance_score": 8,
+         "explanation": "A library of index types for similarity search; an index is only meaningful for vectors from one embedding model.",
+         "important_keywords": ["FAISS", "index", "quantisation"], "related_concepts": ["Sentence Embedding"],
+         "topics": {"ml": 0.8, "systems": 0.4, "devops": 0.15}}
+      ],
+      "rejected_concepts": []
+    },
+    "CAP Theorem": {
+      "tags": ["#distributed-systems", "#consistency"],
+      "raw_tags": ["#databases"],
+      "concepts": [
+        {"concept_name": "Consistency vs Availability Trade-off", "category": "Distributed Systems", "importance_score": 9,
+         "explanation": "During a network partition a store must either refuse requests (CP) or serve possibly stale data (AP).",
+         "important_keywords": ["CP", "AP", "PACELC"], "related_concepts": ["Network Partition"],
+         "topics": {"systems": 1.0}},
+        {"concept_name": "Network Partition", "category": "Distributed Systems", "importance_score": 7,
+         "explanation": "A failure that splits nodes into groups that cannot reach each other; it happens whether you plan for it or not.",
+         "important_keywords": ["partition", "split brain"], "related_concepts": [],
+         "topics": {"systems": 1.0, "devops": 0.1}}
+      ],
+      "rejected_concepts": []
+    },
+    "Raft Consensus": {
+      "tags": ["#distributed-systems", "#consensus", "#raft"],
+      "raw_tags": [],
+      "concepts": [
+        {"concept_name": "Leader Election", "category": "Distributed Systems", "importance_score": 9,
+         "explanation": "Servers time out at random and request votes; a candidate with a majority becomes leader for the term.",
+         "important_keywords": ["term", "vote", "majority"], "related_concepts": ["Replicated Log"],
+         "topics": {"systems": 1.0}},
+        {"concept_name": "Replicated Log", "category": "Distributed Systems", "importance_score": 9,
+         "explanation": "An ordered log every server applies in the same order; an entry commits once a majority stores it.",
+         "important_keywords": ["log", "commit", "state machine"], "related_concepts": ["Leader Election"],
+         "topics": {"systems": 1.0, "devops": 0.15}}
+      ],
+      "rejected_concepts": []
+    },
+    "Event Sourcing": {
+      "tags": ["#distributed-systems", "#event-sourcing", "#architecture"],
+      "raw_tags": ["#cqrs"],
+      "concepts": [
+        {"concept_name": "Append-only Event Log", "category": "Architecture", "importance_score": 9,
+         "explanation": "State is stored as the sequence of events that produced it; current state is a fold over the events.",
+         "important_keywords": ["event", "append-only", "audit"], "related_concepts": ["Event Replay"],
+         "topics": {"systems": 0.95, "devops": 0.1}},
+        {"concept_name": "Event Replay", "category": "Architecture", "importance_score": 7,
+         "explanation": "Replaying events rebuilds state or builds new read models that did not exist when the events were written.",
+         "important_keywords": ["replay", "projection", "read model"], "related_concepts": [],
+         "topics": {"systems": 0.9, "devops": 0.25}}
+      ],
+      "rejected_concepts": []
+    },
+    "Zettelkasten": {
+      "tags": ["#pkm", "#zettelkasten", "#note-taking"],
+      "raw_tags": ["#luhmann"],
+      "concepts": [
+        {"concept_name": "Atomic Notes", "category": "Knowledge Management", "importance_score": 9,
+         "explanation": "One idea per note, in your own words, so it can be linked from many contexts.",
+         "important_keywords": ["atomic", "slip-box", "one idea"], "related_concepts": ["Note Linking"],
+         "topics": {"pkm": 1.0}},
+        {"concept_name": "Note Linking", "category": "Knowledge Management", "importance_score": 8,
+         "explanation": "A note's value comes from its connections; following links surfaces unexpected combinations of ideas.",
+         "important_keywords": ["links", "connections", "link reason"], "related_concepts": ["Atomic Notes"],
+         "topics": {"pkm": 0.9, "ml": 0.3}}
+      ],
+      "rejected_concepts": [
+        {"concept_name": "Index Cards", "category": "Misc", "importance_score": 2,
+         "explanation": "The physical medium Luhmann used.", "important_keywords": [], "related_concepts": []}
+      ]
+    },
+    "Spaced Repetition": {
+      "tags": ["#learning", "#memory", "#pkm"],
+      "raw_tags": ["#anki"],
+      "concepts": [
+        {"concept_name": "Forgetting Curve", "category": "Learning", "importance_score": 8,
+         "explanation": "Memories decay over time; each successful review flattens the curve so reviews can be spaced further apart.",
+         "important_keywords": ["Ebbinghaus", "decay", "review interval"], "related_concepts": ["Active Recall"],
+         "topics": {"pkm": 1.0}},
+        {"concept_name": "Active Recall", "category": "Learning", "importance_score": 9,
+         "explanation": "Retrieving an answer before seeing it, with small precise cards of one fact each.",
+         "important_keywords": ["recall", "flashcards", "one fact per card"], "related_concepts": ["Forgetting Curve"],
+         "topics": {"pkm": 0.95, "ml": 0.1}}
+      ],
+      "rejected_concepts": []
+    },
+    "Evergreen Notes": {
+      "tags": ["#pkm", "#evergreen-notes", "#writing"],
+      "raw_tags": [],
+      "concepts": [
+        {"concept_name": "Evergreen Note", "category": "Knowledge Management", "importance_score": 9,
+         "explanation": "A note written and refined over time to accumulate insight, titled as a complete claim.",
+         "important_keywords": ["evergreen", "refine", "claim titles"], "related_concepts": ["Concept-oriented Notes"],
+         "topics": {"pkm": 1.0}},
+        {"concept_name": "Concept-oriented Notes", "category": "Knowledge Management", "importance_score": 7,
+         "explanation": "Notes organised by idea rather than by source or project, so the same idea is reused across projects.",
+         "important_keywords": ["concept", "associative links"], "related_concepts": ["Atomic Notes"],
+         "topics": {"pkm": 0.9, "ml": 0.2}}
+      ],
+      "rejected_concepts": []
+    }
+  },
+  "relationships": [
+    {"source": "Container Image", "target": "Pod Scheduling", "relationship": "part_of",
+     "evidence": "Images are what Kubernetes pods run; the image is the unit of deployment."},
+    {"source": "Pod Scheduling", "target": "Container Image", "relationship": "uses",
+     "evidence": "Pods are scheduled to run containers built from images."},
+    {"source": "etcd Cluster State", "target": "Leader Election", "relationship": "depends_on",
+     "evidence": "etcd stays consistent by electing a Raft leader; without quorum the control plane stops."},
+    {"source": "Helm Chart Templating", "target": "Pod Scheduling", "relationship": "part_of",
+     "evidence": "Helm releases render the Deployments whose pods Kubernetes schedules."},
+    {"source": "Release Rollback", "target": "Event Replay", "relationship": "similar_to", "verified": false,
+     "evidence": "Both go back in time."},
+    {"source": "Image Build Pipeline", "target": "Container Image", "relationship": "uses",
+     "evidence": "The pipeline builds and pushes the container image tagged with the commit SHA."},
+    {"source": "Image Build Pipeline", "target": "Helm Chart Templating", "relationship": "uses",
+     "evidence": "Deployment upgrades the service's Helm release with the new image tag."},
+    {"source": "Backpropagation", "target": "Stochastic Gradient Descent", "relationship": "depends_on",
+     "evidence": "Backpropagation supplies the gradients that SGD uses to update the weights."},
+    {"source": "Stochastic Gradient Descent", "target": "Backpropagation", "relationship": "uses",
+     "evidence": "SGD steps along gradients computed by backpropagation."},
+    {"source": "Self-Attention", "target": "Multilayer Perceptron", "relationship": "extends",
+     "evidence": "Each transformer block pairs attention with a position-wise feed-forward MLP."},
+    {"source": "Sentence Embedding", "target": "Self-Attention", "relationship": "implemented_with",
+     "evidence": "Sentence embedding models are transformer encoders built on self-attention."},
+    {"source": "Cosine Similarity", "target": "Approximate Nearest Neighbour Search", "relationship": "part_of",
+     "evidence": "ANN indexes rank neighbours by a similarity measure such as cosine."},
+    {"source": "FAISS Index", "target": "Sentence Embedding", "relationship": "uses",
+     "evidence": "A FAISS index stores and searches the vectors an embedding model produces."},
+    {"source": "Approximate Nearest Neighbour Search", "target": "Consistency vs Availability Trade-off", "relationship": "similar_to", "verified": false,
+     "evidence": "Both involve trade-offs."},
+    {"source": "Network Partition", "target": "Leader Election", "relationship": "causes",
+     "evidence": "A partition can leave the minority side unable to elect a leader."},
+    {"source": "Leader Election", "target": "Consistency vs Availability Trade-off", "relationship": "part_of",
+     "evidence": "Raft refuses writes on a minority partition, choosing consistency over availability."},
+    {"source": "Replicated Log", "target": "Append-only Event Log", "relationship": "similar_to",
+     "evidence": "Both treat an ordered, append-only log as the source of truth and derive state from it."},
+    {"source": "Event Replay", "target": "Replicated Log", "relationship": "similar_to",
+     "evidence": "Replaying events mirrors how Raft followers apply committed log entries in order."},
+    {"source": "Note Linking", "target": "Evergreen Note", "relationship": "part_of",
+     "evidence": "Evergreen notes rely on associative links rather than folders."},
+    {"source": "Note Linking", "target": "Sentence Embedding", "relationship": "implemented_with",
+     "evidence": "Embedding similarity can suggest links between notes that never mention each other."},
+    {"source": "Active Recall", "target": "Atomic Notes", "relationship": "similar_to",
+     "evidence": "One fact per card mirrors one idea per note."},
+    {"source": "Forgetting Curve", "target": "Learning Rate Schedule", "relationship": "similar_to", "verified": false,
+     "evidence": "Both are curves over time."},
+    {"source": "Concept-oriented Notes", "target": "Atomic Notes", "relationship": "extends",
+     "evidence": "Concept-oriented evergreen notes build on Zettelkasten's one-idea-per-note rule."}
+  ]
+}
