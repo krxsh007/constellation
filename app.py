@@ -78,6 +78,8 @@ def start_demo() -> None:
         return
     st.session_state.update(vault_path=path, demo_vault=path, demo_autorun=True)
     st.session_state["opts"].update(dry_run=True, force=False, excluded=", ".join(demo.DEMO_EXCLUDED_DIRS))
+    # Applied now (not only at run time) so the vault card already counts 15 notes.
+    config.set_excluded_dirs(demo.DEMO_EXCLUDED_DIRS)
     # Drop the widgets' own state so they redraw from the updated options.
     for name in ("dry_run", "force", "excluded"):
         st.session_state.pop(f"w_{name}", None)
